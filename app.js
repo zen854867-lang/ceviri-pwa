@@ -31,9 +31,9 @@
   function updateStatus() {
     const online = navigator.onLine;
     statusDot.className = `dot dot--${online ? 'online' : 'offline'}`;
-    statusText.textContent = online ? 'Online — Google Translate' : 'Offline — Yerel Sözlük ✅';
+    statusText.textContent = online ? (Translator.getMode() === "groq" ? "Online — Groq AI" : "Online — Google Translate") : "Offline — Yerel Sözlük ✅";
     modeBadge.className = `mode-badge ${online ? 'online' : 'offline'}`;
-    modeText.textContent = online ? '🌐 Online mod' : '📴 Offline mod';
+    modeText.textContent = online ? (Translator.getMode() === "groq" ? "🤖 Groq AI" : "🌐 Google") : "📴 Offline";
   }
 
   window.addEventListener('online',  updateStatus);
@@ -174,3 +174,4 @@
   Translator.preloadModel();
 
 })();
+    
