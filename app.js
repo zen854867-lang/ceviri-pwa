@@ -272,11 +272,17 @@
 
   /* ---------- Model durumunu kontrol et ---------- */
   async function checkModels() {
-    const enOk = await Translator.checkModelExists('en-tr');
-    const jaOk = await Translator.checkModelExists('ja-tr');
-
-    if (!enOk || !jaOk) {
-      console.info('Offline model bulunamadı — sadece online mod aktif.');
+    if (Translator.getIsOnline()) {
+      showError('📥 Offline model arka planda indiriliyor...');
+      try {
+        await Translator.preloadModel('en');
+        await Translator.preloadModel('ja');
+        hideError();
+        showError('✅ Offline model hazır!');
+        setTimeout(hideError, 3000);
+      } catch(e) {
+        hideError();
+      }
     }
   }
 
