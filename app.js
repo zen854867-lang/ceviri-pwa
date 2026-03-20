@@ -28,12 +28,12 @@
   let lastSRTBlocks = null;
 
   /* ---------- Durum ---------- */
-  function updateStatus() {
+   function updateStatus() {
     const online = navigator.onLine;
     statusDot.className = `dot dot--${online ? 'online' : 'offline'}`;
-    statusText.textContent = online ? (Translator.getMode() === "groq" ? "Online — Groq AI" : "Online — Google Translate") : "Offline — Yerel Sözlük ✅";
+    statusText.textContent = online ? `Online — ${Translator.getLastProvider()}` : 'Offline — Yerel Sözlük ✅';
     modeBadge.className = `mode-badge ${online ? 'online' : 'offline'}`;
-    modeText.textContent = online ? (Translator.getMode() === "groq" ? "🤖 Groq AI" : "🌐 Google") : "📴 Offline";
+    modeText.textContent = online ? `🤖 ${Translator.getLastProvider()}` : '📴 Offline';
   }
 
   window.addEventListener('online',  updateStatus);
