@@ -18,20 +18,73 @@ Rules:
 - Match the tone: angry=sert, sad=duygusal, funny=eğlenceli
 - Output ONLY translations, one per line, same count as input`;
 
+  // Japonca karakter aralıkları
+  const JP_REGEX = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uFF00-\uFFEF]/;
+
   function getIsOnline()     { return navigator.onLine; }
   function isModelsReady()   { return sozluk !== null; }
   function getMode()         { return activeMode; }
   function setMode(mode)     { activeMode = mode; }
   function getLastProvider() { return lastProvider; }
 
-  /* ---------- Cache ---------- */
+  /* ============================================================
+     POST-PROCESSING
+     Hem online hem offline çeviriden sonra uygulanır
+     ============================================================ */
+  function postProcess(text) {
+    if (!text) return text;
+    let t = text;
+
+    // 1. Tümü büyük harf → düzelt (HAYIR → Hayır)
+    t = t.replace(/\b([A-ZÇĞİÖŞÜ]{2,})\b/g, w =>
+      w.charAt(0) + w.slice(1).toLowerCase()
+    );
+
+    // 2. Çift boşluk temizle
+    t = t.replace(/  +/g, ' ');
+
+    // 3. Satır başı/sonu boşluk
+    t = t.split('\n').map(l => l.trim()).join('\n');
+
+    // 4. Üç nokta standardize et
+    t = t.replace(/\.\.\.\./g, '...').replace(/。。。/g, '...');
+
+    // 5. Japonca karakter kalıntısı varsa işaretle
+    if (JP_REGEX.test(t)) {
+      t = t.replace(/[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uFF00-\uFFEF]+/g, '');
+      t = t.replace(/  +/g, ' ').trim();
+    }
+
+    // 6. Türkçe doğallaştırma
+    t = t
+      .replace(/\bben\s+ben\b/gi, 'ben')
+      .replace(/\bseni\s+seni\b/gi, 'seni')
+      .replace(/\bve\s+ve\b/gi, 've')
+      .replace(/\bama\s+ama\b/gi, 'ama')
+      .replace(/\bbu\s+bu\b/gi, 'bu');
+
+    // 7. Noktalama düzelt
+    t = t.replace(/\s+([.,!?;:])/g, '$1');
+    t = t.replace(/([.,!?;:])([^\s"'])/g, '$1 $2');
+
+    // 8. Boş satırları temizle (çok sayıda art arda)
+    t = t.replace(/\n{3,}/g, '\n\n');
+
+    return t.trim();
+  }
+
+  /* ============================================================
+     CACHE
+     ============================================================ */
   function getCached(key) { return cache.get(key); }
   function setCached(key, val) {
     if (cache.size > 1000) cache.delete(cache.keys().next().value);
     cache.set(key, val);
   }
 
-  /* ---------- Sözlük ---------- */
+  /* ============================================================
+     SÖZLÜK
+     ============================================================ */
   async function loadSozluk() {
     if (sozluk) return sozluk;
     try {
@@ -46,7 +99,9 @@ Rules:
     return d[text.trim()] || null;
   }
 
-  /* ---------- API çağrısı ---------- */
+  /* ============================================================
+     API ÇAĞRISI
+     ============================================================ */
   async function callAPI(url, key, model, system, userMsg) {
     const res = await fetch(url, {
       method: 'POST',
@@ -66,23 +121,15 @@ Rules:
     return data.choices[0].message.content.trim();
   }
 
-  /* ---------- AI Providerlar ---------- */
   const aiProviders = [
-    {
-      name: 'Groq',
-      call: (sys, msg) => callAPI('https://api.groq.com/openai/v1/chat/completions', KEYS.groq, 'llama-3.1-8b-instant', sys, msg)
-    },
-    {
-      name: 'GPT-4o-mini',
-      call: (sys, msg) => callAPI('https://api.openai.com/v1/chat/completions', KEYS.openai, 'gpt-4o-mini', sys, msg)
-    },
-    {
-      name: 'OpenRouter',
-      call: (sys, msg) => callAPI('https://openrouter.ai/api/v1/chat/completions', KEYS.openrouter, 'meta-llama/llama-3.1-8b-instruct:free', sys, msg)
-    }
+    { name: 'Groq',       call: (s, m) => callAPI('https://api.groq.com/openai/v1/chat/completions',      KEYS.groq,       'llama-3.1-8b-instant',                      s, m) },
+    { name: 'GPT-4o-mini',call: (s, m) => callAPI('https://api.openai.com/v1/chat/completions',           KEYS.openai,     'gpt-4o-mini',                               s, m) },
+    { name: 'OpenRouter', call: (s, m) => callAPI('https://openrouter.ai/api/v1/chat/completions',        KEYS.openrouter, 'meta-llama/llama-3.1-8b-instruct:free',     s, m) }
   ];
 
-  /* ---------- Google Translate ---------- */
+  /* ============================================================
+     GOOGLE TRANSLATE
+     ============================================================ */
   async function googleTranslate(text, lang) {
     const params = new URLSearchParams({ client: 'gtx', sl: lang, tl: 'tr', dt: 't', q: text });
     const res = await fetch('https://translate.googleapis.com/translate_a/single?' + params);
@@ -91,61 +138,54 @@ Rules:
     return data[0].filter(i => i && i[0]).map(i => i[0]).join('');
   }
 
-  /* ---------- Offline sözlük ---------- */
+  /* ============================================================
+     OFFLINE ÇEVİRİ
+     ============================================================ */
   async function offlineTranslate(text, lang) {
-    if (lang !== 'ja') return text;
+    if (lang !== 'ja') return postProcess(text);
     const d = await loadSozluk();
-    // Sadece tam eşleşme — bozuk çeviri olmasın
-    return d[text.trim()] || text;
+    const result = d[text.trim()] || text;
+    return postProcess(result);
   }
 
-  /* ---------- Bağlamlı AI çevirisi (SRT için) ---------- */
+  /* ============================================================
+     BATCH AI ÇEVİRİSİ (bağlamlı)
+     ============================================================ */
   async function translateBatch(lines, lang) {
     const langName = lang === 'ja' ? 'Japanese' : 'English';
     const system = SYSTEM(langName);
     const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
     const prompt = `Translate these ${lines.length} subtitle lines to Turkish. Output exactly ${lines.length} lines, numbered:\n\n${numbered}`;
 
-    let result = null;
-
     if (activeMode === 'google') {
-      // Google modunda her satırı ayrı gönder
       const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
-      return out;
+      return out.map(postProcess);
     }
 
-    // AI modunda: Groq → GPT → OpenRouter → Google
     for (const p of aiProviders) {
       try {
         const raw = await p.call(system, prompt);
         lastProvider = p.name;
-        // Numaralı satırları parse et
         const parsed = raw.split('\n')
           .map(l => l.replace(/^\d+\.\s*/, '').trim())
           .filter(l => l.length > 0);
         if (parsed.length >= lines.length * 0.8) {
-          // Yeterli satır döndüyse kullan
-          const out = lines.map((_, i) => parsed[i] || lines[i]);
-          return out;
+          return lines.map((orig, i) => postProcess(parsed[i] || orig));
         }
-        result = parsed;
-        break;
       } catch(e) {
-        console.warn(p.name + ' başarısız:', e.message);
+        console.warn(p.name + ':', e.message);
       }
     }
 
-    // AI başarısız → Google'a düş
-    if (!result) {
-      lastProvider = 'Google';
-      const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
-      return out;
-    }
-
-    return lines.map((_, i) => result[i] || lines[i]);
+    // Tüm AI başarısız → Google
+    lastProvider = 'Google';
+    const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
+    return out.map(postProcess);
   }
 
-  /* ---------- Ana çeviri ---------- */
+  /* ============================================================
+     ANA ÇEVİRİ
+     ============================================================ */
   async function translate(text, lang) {
     if (!text || !text.trim()) throw new Error('Metin boş.');
     if (!['en', 'ja'].includes(lang)) throw new Error('Desteklenmeyen dil.');
@@ -155,36 +195,38 @@ Rules:
     const blocks = isSRT ? text.split(sep) : text.split('\n');
     const useOffline = !navigator.onLine;
 
-    // Offline mod
+    // Offline
     if (useOffline) {
-      lastProvider = 'Offline Sözlük';
-      const results = await Promise.all(blocks.map(b => b.trim() ? offlineTranslate(b, lang) : Promise.resolve(b)));
+      lastProvider = '📴 Sözlük';
+      const results = await Promise.all(
+        blocks.map(b => b.trim() ? offlineTranslate(b, lang) : Promise.resolve(b))
+      );
       return results.join(isSRT ? sep : '\n');
     }
 
-    // Cache kontrolü (tüm metin için)
-    const cacheKey = `${lang}:${text.substring(0, 100)}`;
+    // Cache
+    const cacheKey = `${lang}:${text.substring(0, 150)}`;
     const cached = getCached(cacheKey);
     if (cached) { lastProvider = '⚡ Cache'; return cached; }
 
-    // Sözlükte tam eşleşme ara (tek satır metin için)
+    // Tek satır — sözlük kontrolü
     if (!isSRT && blocks.length === 1) {
       const dictMatch = await dictExact(text);
       if (dictMatch) {
+        const result = postProcess(dictMatch);
         lastProvider = '📖 Sözlük';
-        setCached(cacheKey, dictMatch);
-        return dictMatch;
+        setCached(cacheKey, result);
+        return result;
       }
     }
 
-    // AI ile bağlamlı çeviri — 8'li batch
+    // AI ile bağlamlı batch çeviri
     const BATCH = 8;
     const results = new Array(blocks.length);
 
     for (let i = 0; i < blocks.length; i += BATCH) {
       const batch = blocks.slice(i, i + BATCH);
-      const nonEmpty = batch.map(b => b.trim() ? b : '');
-      const toTranslate = nonEmpty.filter(b => b.length > 0);
+      const toTranslate = batch.filter(b => b.trim());
 
       if (!toTranslate.length) {
         batch.forEach((b, j) => { results[i + j] = b; });
@@ -194,28 +236,19 @@ Rules:
       // Sözlükten tam eşleşenleri ayır
       const dictResults = await Promise.all(toTranslate.map(b => dictExact(b)));
       const needsAI = toTranslate.filter((_, j) => dictResults[j] === null);
-      const aiIndices = toTranslate.map((_, j) => dictResults[j] === null ? j : -1).filter(j => j >= 0);
 
       let aiTranslated = [];
       if (needsAI.length > 0) {
         aiTranslated = await translateBatch(needsAI, lang);
       }
 
-      // Sonuçları birleştir
-      let aiIdx = 0;
-      let dictIdx = 0;
-      let trIdx = 0;
-
+      let aiIdx = 0, trIdx = 0;
       batch.forEach((b, j) => {
         if (!b.trim()) {
           results[i + j] = b;
         } else {
           const dMatch = dictResults[trIdx];
-          if (dMatch !== null) {
-            results[i + j] = dMatch;
-          } else {
-            results[i + j] = aiTranslated[aiIdx++] || b;
-          }
+          results[i + j] = dMatch !== null ? postProcess(dMatch) : (aiTranslated[aiIdx++] || b);
           trIdx++;
         }
       });
