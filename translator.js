@@ -1,53 +1,28 @@
 const Translator = (() => {
   let isOnline = navigator.onLine;
-  let pipelineJaEn = null;
-  let pipelineEnTr = null;
-  let modelsReady = false;
-  let modelsLoading = false;
+  let sozluk = null;
 
   window.addEventListener('online',  () => { isOnline = true; });
   window.addEventListener('offline', () => { isOnline = false; });
   function getIsOnline() { return isOnline; }
 
-  async function loadTransformers() {
-    for (let i = 0; i < 20; i++) {
-      if (window.transformers && window.transformers.pipeline) {
-        return window.transformers.pipeline;
-      }
-      await new Promise(r => setTimeout(r, 500));
-    }
-    throw new Error('Transformers yuklenemedi');
-  }
-
-  async function loadModels() {
-    if (modelsReady) return;
-    if (modelsLoading) {
-      while (modelsLoading) await new Promise(r => setTimeout(r, 500));
-      return;
-    }
-    modelsLoading = true;
-    try {
-      const pipeline = await loadTransformers();
-      const base = 'https://zen854867-lang.github.io/ceviri-pwa/models';
-      if (!pipelineJaEn) pipelineJaEn = await pipeline('translation', `${base}/ja-en`);
-      if (!pipelineEnTr) pipelineEnTr = await pipeline('translation', `${base}/en-tr`);
-      modelsReady = true;
-    } finally {
-      modelsLoading = false;
-    }
+  async function loadSozluk() {
+    if (sozluk) return sozluk;
+    const res = await fetch('./ja_tr.json');
+    sozluk = await res.json();
+    return sozluk;
   }
 
   async function offlineTranslate(text, sourceLang) {
-    await loadModels();
-    if (sourceLang === 'ja') {
-      const enResult = await pipelineJaEn(text, { max_new_tokens: 512 });
-      const enText = enResult[0].translation_text;
-      const trResult = await pipelineEnTr(enText, { max_new_tokens: 512 });
-      return trResult[0].translation_text;
-    } else {
-      const result = await pipelineEnTr(text, { max_new_tokens: 512 });
-      return result[0].translation_text;
+    if (sourceLang !== 'ja') return text;
+    const dict = await loadSozluk();
+    if (dict[text.trim()]) return dict[text.trim()];
+    let result = text;
+    const keys = Object.keys(dict).sort((a, b) => b.length - a.length);
+    for (const key of keys) {
+      result = result.split(key).join(dict[key]);
     }
+    return result;
   }
 
   async function googleTranslate(text, sourceLang) {
@@ -73,7 +48,9 @@ const Translator = (() => {
         return await googleTranslate(b, sourceLang);
       }));
       out.forEach((r, j) => { results[i + j] = r; });
-      if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, useOffline ? 0 : 100));
+      if (i + BATCH < blocks.length && !useOffline) {
+        await new Promise(r => setTimeout(r, 100));
+      }
     }
     return results;
   }
@@ -82,24 +59,15 @@ const Translator = (() => {
     if (!text || !text.trim()) throw new Error('Metin bos.');
     if (!['en', 'ja'].includes(sourceLang)) throw new Error('Desteklenmeyen dil.');
     const useOffline = !isOnline;
-    if (useOffline && !modelsReady) throw new Error('Offline model henuz hazir degil. Once internette bir ceviri yapin.');
     const sep = '\n|||SEP|||\n';
     const blocks = text.includes('|||SEP|||') ? text.split(sep) : text.split('\n');
     const translated = await translateBlocks(blocks, sourceLang, useOffline);
     return translated.join(text.includes('|||SEP|||') ? sep : '\n');
   }
 
-  async function preloadModel() {
-    try {
-      await loadModels();
-    } catch(e) {
-      console.warn('Model yuklenemedi:', e);
-      throw e;
-    }
-  }
-
-  function isModelsReady() { return modelsReady; }
-  async function checkModelExists() { return modelsReady; }
+  function isModelsReady() { return true; }
+  async function checkModelExists() { return true; }
+  async function preloadModel() { await loadSozluk(); }
 
   return { translate, getIsOnline, checkModelExists, preloadModel, isModelsReady };
 })();
