@@ -2,6 +2,8 @@ const Translator = (() => {
   let isOnline = navigator.onLine;
   let pipelineJaEn = null;
   let pipelineEnTr = null;
+  let modelsReady = false;
+  let modelsLoading = false;
 
   window.addEventListener('online',  () => { isOnline = true; });
   window.addEventListener('offline', () => { isOnline = false; });
@@ -19,14 +21,25 @@ const Translator = (() => {
       `;
       document.head.appendChild(s);
       window.addEventListener('transformers-ready', () => resolve(window.transformersPipeline), { once: true });
-      setTimeout(() => reject(new Error('Transformers yuklenemedi')), 30000);
+      setTimeout(() => reject(new Error('Transformers yuklenemedi')), 60000);
     });
   }
 
   async function loadModels() {
-    const pipeline = await loadTransformers();
-    if (!pipelineJaEn) pipelineJaEn = await pipeline('translation', 'Xenova/opus-mt-ja-en');
-    if (!pipelineEnTr) pipelineEnTr = await pipeline('translation', 'Xenova/opus-mt-en-tr');
+    if (modelsReady) return;
+    if (modelsLoading) {
+      while (modelsLoading) await new Promise(r => setTimeout(r, 500));
+      return;
+    }
+    modelsLoading = true;
+    try {
+      const pipeline = await loadTransformers();
+      if (!pipelineJaEn) pipelineJaEn = await pipeline('translation', 'Xenova/opus-mt-ja-en');
+      if (!pipelineEnTr) pipelineEnTr = await pipeline('translation', 'Xenova/opus-mt-en-tr');
+      modelsReady = true;
+    } finally {
+      modelsLoading = false;
+    }
   }
 
   async function offlineTranslate(text, sourceLang) {
@@ -56,7 +69,7 @@ const Translator = (() => {
 
   async function translateBlocks(blocks, sourceLang, useOffline) {
     const results = new Array(blocks.length);
-    const BATCH = 5;
+    const BATCH = useOffline ? 1 : 5; // offline modda tek tek (model ağır)
     for (let i = 0; i < blocks.length; i += BATCH) {
       const batch = blocks.slice(i, i + BATCH);
       const out = await Promise.all(batch.map(async b => {
@@ -65,7 +78,7 @@ const Translator = (() => {
         return await googleTranslate(b, sourceLang);
       }));
       out.forEach((r, j) => { results[i + j] = r; });
-      if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, 100));
+      if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, useOffline ? 0 : 100));
     }
     return results;
   }
@@ -74,13 +87,25 @@ const Translator = (() => {
     if (!text || !text.trim()) throw new Error('Metin bos.');
     if (!['en', 'ja'].includes(sourceLang)) throw new Error('Desteklenmeyen dil.');
     const useOffline = !isOnline;
+    if (useOffline && !modelsReady) throw new Error('Offline model henuz hazir degil. Once internette bir ceviri yapin.');
     const sep = '\n|||SEP|||\n';
     const blocks = text.includes('|||SEP|||') ? text.split(sep) : text.split('\n');
     const translated = await translateBlocks(blocks, sourceLang, useOffline);
     return translated.join(text.includes('|||SEP|||') ? sep : '\n');
   }
 
-  async function checkModelExists() { return false; }
+  async function preloadModel() {
+    try {
+      await loadModels();
+    } catch(e) {
+      console.warn('Model yuklenemedi:', e);
+      throw e;
+    }
+  }
 
-  return { translate, getIsOnline, checkModelExists };
+  function isModelsReady() { return modelsReady; }
+
+  async function checkModelExists() { return modelsReady; }
+
+  return { translate, getIsOnline, checkModelExists, preloadModel, isModelsReady };
 })();
