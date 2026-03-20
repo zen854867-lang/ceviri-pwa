@@ -44,13 +44,16 @@ jobs:
               download(f"{base_ja}/{f}", f"models/ja-en/{f}")
           PYEOF
 
-      - name: Commit models
+       - name: Commit models
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}
+          git lfs install
+          git lfs track "*.onnx"
+          git add .gitattributes
           git add models/
           git commit -m "Add offline models" || echo "Nothing to commit"
           git push
