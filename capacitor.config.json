@@ -1,0 +1,8 @@
+{
+  "appId": "com.ceviri.anime",
+  "appName": "Çeviri",
+  "webDir": ".",
+  "server": {
+    "androidScheme": "https"
+  }
+}
