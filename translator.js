@@ -8,11 +8,14 @@ const Translator = (() => {
   window.addEventListener('online',  () => { isOnline = true; });
   window.addEventListener('offline', () => { isOnline = false; });
   function getIsOnline() { return isOnline; }
-  
+
   async function loadTransformers() {
-    if (window.pipeline) return window.pipeline;
-    await new Promise(r => setTimeout(r, 500));
-    if (window.pipeline) return window.pipeline;
+    for (let i = 0; i < 20; i++) {
+      if (window.transformers && window.transformers.pipeline) {
+        return window.transformers.pipeline;
+      }
+      await new Promise(r => setTimeout(r, 500));
+    }
     throw new Error('Transformers yuklenemedi');
   }
 
@@ -33,7 +36,6 @@ const Translator = (() => {
       modelsLoading = false;
     }
   }
-  
 
   async function offlineTranslate(text, sourceLang) {
     await loadModels();
@@ -62,7 +64,7 @@ const Translator = (() => {
 
   async function translateBlocks(blocks, sourceLang, useOffline) {
     const results = new Array(blocks.length);
-    const BATCH = useOffline ? 1 : 5; // offline modda tek tek (model ağır)
+    const BATCH = useOffline ? 1 : 5;
     for (let i = 0; i < blocks.length; i += BATCH) {
       const batch = blocks.slice(i, i + BATCH);
       const out = await Promise.all(batch.map(async b => {
@@ -97,7 +99,6 @@ const Translator = (() => {
   }
 
   function isModelsReady() { return modelsReady; }
-
   async function checkModelExists() { return modelsReady; }
 
   return { translate, getIsOnline, checkModelExists, preloadModel, isModelsReady };
