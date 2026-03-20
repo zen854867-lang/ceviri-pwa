@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="description" content="Anime çeviri uygulaması — Japonca ve İngilizce → Türkçe" />
+  <title>翻訳 · Çeviri</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Arka plan efekti -->
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+
+  <header class="header">
+    <div class="logo">
+      <span class="logo-jp">翻訳</span>
+      <span class="logo-tr">Çeviri</span>
+    </div>
+    <div class="status-bar">
+      <span id="status-dot" class="dot dot--offline"></span>
+      <span id="status-text">Bağlantı kontrol ediliyor...</span>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- Dil seçimi -->
+    <div class="lang-selector">
+      <button class="lang-btn active" data-lang="en" id="btn-en">
+        <span class="lang-flag">🇬🇧</span>
+        <span>İngilizce</span>
+      </button>
+      <div class="lang-arrow">→</div>
+      <button class="lang-btn active" data-lang="ja" id="btn-ja">
+        <span class="lang-flag">🇯🇵</span>
+        <span>Japonca</span>
+      </button>
+      <div class="lang-arrow-target">→ 🇹🇷 Türkçe</div>
+    </div>
+
+    <!-- Giriş alanı -->
+    <section class="panel panel--input">
+      <div class="panel-header">
+        <span class="panel-label">Kaynak Metin</span>
+        <div class="panel-actions">
+          <button class="icon-btn" id="btn-paste" title="Panodan yapıştır">📋</button>
+          <button class="icon-btn" id="btn-clear" title="Temizle">✕</button>
+        </div>
+      </div>
+      <textarea
+        id="input-text"
+        class="text-area"
+        placeholder="Çevirmek istediğin metni buraya yaz veya dosya yükle..."
+        spellcheck="false"
+      ></textarea>
+      <div class="char-count"><span id="char-count">0</span> karakter</div>
+    </section>
+
+    <!-- Dosya yükleme -->
+    <section class="file-zone" id="file-zone">
+      <input type="file" id="file-input" accept=".txt,.srt" hidden />
+      <label for="file-input" class="file-label">
+        <span class="file-icon">📂</span>
+        <span class="file-text">
+          <strong>.txt</strong> veya <strong>.srt</strong> dosyası yükle
+        </span>
+        <span class="file-hint">Sürükle bırak da çalışır</span>
+      </label>
+      <div id="file-info" class="file-info hidden"></div>
+    </section>
+
+    <!-- Çevir butonu -->
+    <div class="translate-row">
+      <button class="translate-btn" id="btn-translate">
+        <span class="btn-text">Çevir</span>
+        <span class="btn-icon">→</span>
+      </button>
+      <div class="mode-badge" id="mode-badge">
+        <span id="mode-text">— mod</span>
+      </div>
+    </div>
+
+    <!-- Yükleniyor -->
+    <div class="loader hidden" id="loader">
+      <div class="loader-bar"></div>
+      <span>Çevriliyor...</span>
+    </div>
+
+    <!-- Çıktı alanı -->
+    <section class="panel panel--output hidden" id="output-panel">
+      <div class="panel-header">
+        <span class="panel-label">Türkçe Çeviri</span>
+        <div class="panel-actions">
+          <button class="icon-btn" id="btn-copy" title="Kopyala">📄</button>
+          <button class="icon-btn" id="btn-download" title="İndir">⬇️</button>
+        </div>
+      </div>
+      <div id="output-text" class="output-text"></div>
+    </section>
+
+    <!-- Hata mesajı -->
+    <div class="error-box hidden" id="error-box">
+      <span id="error-msg"></span>
+    </div>
+
+  </main>
+
+  <footer class="footer">
+    <span>🌐 Online → Google Translate &nbsp;|&nbsp; 📴 Offline → Yerel Sözlük</span>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="file_handler.js"></script>
+  <script src="translator.js"></script>
+  <script src="app.js"></script>
+
+  <!-- Service Worker kaydı (sadece https veya localhost'ta çalışır) -->
+  <script>
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      navigator.serviceWorker.register('sw.js')
+        .then(() => console.log('SW kayıtlı'))
+        .catch(e => console.warn('SW hatası:', e));
+    }
+  </script>
+
+</body>
+</html>
