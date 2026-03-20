@@ -1,10 +1,9 @@
 const Translator = (() => {
-  let isOnline = navigator.onLine;
   let sozluk = null;
 
-  window.addEventListener('online',  () => { isOnline = true; });
-  window.addEventListener('offline', () => { isOnline = false; });
-  function getIsOnline() { return isOnline; }
+  function getIsOnline() {
+    return navigator.onLine;
+  }
 
   async function loadSozluk() {
     if (sozluk) return sozluk;
@@ -58,7 +57,7 @@ const Translator = (() => {
   async function translate(text, sourceLang) {
     if (!text || !text.trim()) throw new Error('Metin bos.');
     if (!['en', 'ja'].includes(sourceLang)) throw new Error('Desteklenmeyen dil.');
-    const useOffline = !isOnline;
+    const useOffline = !navigator.onLine;
     const sep = '\n|||SEP|||\n';
     const blocks = text.includes('|||SEP|||') ? text.split(sep) : text.split('\n');
     const translated = await translateBlocks(blocks, sourceLang, useOffline);
@@ -67,7 +66,9 @@ const Translator = (() => {
 
   function isModelsReady() { return true; }
   async function checkModelExists() { return true; }
-  async function preloadModel() { await loadSozluk(); }
+  async function preloadModel() {
+    try { await loadSozluk(); } catch(e) {}
+  }
 
   return { translate, getIsOnline, checkModelExists, preloadModel, isModelsReady };
 })();
