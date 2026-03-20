@@ -10,14 +10,13 @@ const Translator = (() => {
     openrouter: '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'
   };
 
-  const SYSTEM_PROMPT = (lang) =>
-    `You are an anime subtitle translator. Translate ${lang} to Turkish.
+  const SYSTEM = (lang) => `You are a professional anime subtitle translator. Translate ${lang} to natural Turkish.
 Rules:
-- Keep honorifics as is: senpai, kun, chan, sama, sensei, dono
-- Translate naturally, not word by word
-- Keep sound effects in original form
-- Output ONLY the translation, nothing else
-- Keep the exact same number of lines`;
+- Keep honorifics: senpai, kun, chan, sama, sensei, dono, san
+- Translate naturally and in context, not word by word
+- Keep sound effects as is (e.g. ドン, ガン)
+- Match the tone: angry=sert, sad=duygusal, funny=eğlenceli
+- Output ONLY translations, one per line, same count as input`;
 
   function getIsOnline()     { return navigator.onLine; }
   function isModelsReady()   { return sozluk !== null; }
@@ -26,118 +25,124 @@ Rules:
   function getLastProvider() { return lastProvider; }
 
   /* ---------- Cache ---------- */
-  function getCached(text, lang) { return cache.get(`${lang}:${text}`); }
-  function setCached(text, lang, result) {
-    if (cache.size > 500) cache.delete(cache.keys().next().value);
-    cache.set(`${lang}:${text}`, result);
+  function getCached(key) { return cache.get(key); }
+  function setCached(key, val) {
+    if (cache.size > 1000) cache.delete(cache.keys().next().value);
+    cache.set(key, val);
   }
 
   /* ---------- Sözlük ---------- */
   async function loadSozluk() {
     if (sozluk) return sozluk;
-    try { const r = await fetch('./ja_tr.json'); sozluk = await r.json(); }
-    catch(e) { sozluk = {}; }
+    try {
+      const r = await fetch('./ja_tr.json');
+      sozluk = await r.json();
+    } catch(e) { sozluk = {}; }
     return sozluk;
   }
 
-  async function dictLookup(text, lang) {
-    if (lang !== 'ja') return null;
+  async function dictExact(text) {
     const d = await loadSozluk();
     return d[text.trim()] || null;
   }
 
-  /* ---------- Providerlar ---------- */
-  async function callAPI(url, headers, body) {
-    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+  /* ---------- API çağrısı ---------- */
+  async function callAPI(url, key, model, system, userMsg) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userMsg }
+        ],
+        temperature: 0.2,
+        max_tokens: 2048
+      })
+    });
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     return data.choices[0].message.content.trim();
   }
 
-  const providers = [
+  /* ---------- AI Providerlar ---------- */
+  const aiProviders = [
     {
-      name: 'Groq (LLaMA)',
-      fn: (text, lang) => callAPI(
-        'https://api.groq.com/openai/v1/chat/completions',
-        { 'Authorization': `Bearer ${KEYS.groq}` },
-        { model: 'llama-3.1-8b-instant', temperature: 0.2, max_tokens: 1024,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT(lang === 'ja' ? 'Japanese' : 'English') }, { role: 'user', content: text }] }
-      )
+      name: 'Groq',
+      call: (sys, msg) => callAPI('https://api.groq.com/openai/v1/chat/completions', KEYS.groq, 'llama-3.1-8b-instant', sys, msg)
     },
     {
       name: 'GPT-4o-mini',
-      fn: (text, lang) => callAPI(
-        'https://api.openai.com/v1/chat/completions',
-        { 'Authorization': `Bearer ${KEYS.openai}` },
-        { model: 'gpt-4o-mini', temperature: 0.2, max_tokens: 1024,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT(lang === 'ja' ? 'Japanese' : 'English') }, { role: 'user', content: text }] }
-      )
+      call: (sys, msg) => callAPI('https://api.openai.com/v1/chat/completions', KEYS.openai, 'gpt-4o-mini', sys, msg)
     },
     {
       name: 'OpenRouter',
-      fn: (text, lang) => callAPI(
-        'https://openrouter.ai/api/v1/chat/completions',
-        { 'Authorization': `Bearer ${KEYS.openrouter}` },
-        { model: 'meta-llama/llama-3.1-8b-instruct:free', temperature: 0.2, max_tokens: 1024,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT(lang === 'ja' ? 'Japanese' : 'English') }, { role: 'user', content: text }] }
-      )
-    },
-    {
-      name: 'Google',
-      fn: async (text, lang) => {
-        const params = new URLSearchParams({ client: 'gtx', sl: lang, tl: 'tr', dt: 't', q: text });
-        const res = await fetch('https://translate.googleapis.com/translate_a/single?' + params);
-        if (!res.ok) throw new Error(res.status);
-        const data = await res.json();
-        return data[0].filter(i => i && i[0]).map(i => i[0]).join('');
-      }
+      call: (sys, msg) => callAPI('https://openrouter.ai/api/v1/chat/completions', KEYS.openrouter, 'meta-llama/llama-3.1-8b-instruct:free', sys, msg)
     }
   ];
 
-  /* ---------- Offline ---------- */
+  /* ---------- Google Translate ---------- */
+  async function googleTranslate(text, lang) {
+    const params = new URLSearchParams({ client: 'gtx', sl: lang, tl: 'tr', dt: 't', q: text });
+    const res = await fetch('https://translate.googleapis.com/translate_a/single?' + params);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    return data[0].filter(i => i && i[0]).map(i => i[0]).join('');
+  }
+
+  /* ---------- Offline sözlük ---------- */
   async function offlineTranslate(text, lang) {
     if (lang !== 'ja') return text;
     const d = await loadSozluk();
-    if (d[text.trim()]) return d[text.trim()];
-    let r = text;
-    Object.keys(d).sort((a, b) => b.length - a.length).forEach(k => { r = r.split(k).join(d[k]); });
-    return r;
+    // Sadece tam eşleşme — bozuk çeviri olmasın
+    return d[text.trim()] || text;
   }
 
-  /* ---------- Akıllı çeviri ---------- */
-  async function smartTranslate(text, lang) {
-    if (!text || !text.trim()) return text;
+  /* ---------- Bağlamlı AI çevirisi (SRT için) ---------- */
+  async function translateBatch(lines, lang) {
+    const langName = lang === 'ja' ? 'Japanese' : 'English';
+    const system = SYSTEM(langName);
+    const numbered = lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+    const prompt = `Translate these ${lines.length} subtitle lines to Turkish. Output exactly ${lines.length} lines, numbered:\n\n${numbered}`;
 
-    const cached = getCached(text, lang);
-    if (cached) { lastProvider = '⚡ Cache'; return cached; }
+    let result = null;
 
-    const dictMatch = await dictLookup(text, lang);
-    if (dictMatch) { lastProvider = '📖 Sözlük'; setCached(text, lang, dictMatch); return dictMatch; }
-
-    if (!navigator.onLine) {
-      lastProvider = '📴 Offline';
-      const r = await offlineTranslate(text, lang);
-      setCached(text, lang, r);
-      return r;
+    if (activeMode === 'google') {
+      // Google modunda her satırı ayrı gönder
+      const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
+      return out;
     }
 
-    const list = activeMode === 'google'
-      ? [providers[3]]
-      : providers;
-
-    for (const p of list) {
+    // AI modunda: Groq → GPT → OpenRouter → Google
+    for (const p of aiProviders) {
       try {
-        const r = await p.fn(text, lang);
+        const raw = await p.call(system, prompt);
         lastProvider = p.name;
-        setCached(text, lang, r);
-        return r;
+        // Numaralı satırları parse et
+        const parsed = raw.split('\n')
+          .map(l => l.replace(/^\d+\.\s*/, '').trim())
+          .filter(l => l.length > 0);
+        if (parsed.length >= lines.length * 0.8) {
+          // Yeterli satır döndüyse kullan
+          const out = lines.map((_, i) => parsed[i] || lines[i]);
+          return out;
+        }
+        result = parsed;
+        break;
       } catch(e) {
         console.warn(p.name + ' başarısız:', e.message);
       }
     }
 
-    lastProvider = 'Başarısız';
-    return text;
+    // AI başarısız → Google'a düş
+    if (!result) {
+      lastProvider = 'Google';
+      const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
+      return out;
+    }
+
+    return lines.map((_, i) => result[i] || lines[i]);
   }
 
   /* ---------- Ana çeviri ---------- */
@@ -148,24 +153,79 @@ Rules:
     const sep = '\n|||SEP|||\n';
     const isSRT = text.includes('|||SEP|||');
     const blocks = isSRT ? text.split(sep) : text.split('\n');
-    const BATCH = navigator.onLine ? 5 : 1;
+    const useOffline = !navigator.onLine;
+
+    // Offline mod
+    if (useOffline) {
+      lastProvider = 'Offline Sözlük';
+      const results = await Promise.all(blocks.map(b => b.trim() ? offlineTranslate(b, lang) : Promise.resolve(b)));
+      return results.join(isSRT ? sep : '\n');
+    }
+
+    // Cache kontrolü (tüm metin için)
+    const cacheKey = `${lang}:${text.substring(0, 100)}`;
+    const cached = getCached(cacheKey);
+    if (cached) { lastProvider = '⚡ Cache'; return cached; }
+
+    // Sözlükte tam eşleşme ara (tek satır metin için)
+    if (!isSRT && blocks.length === 1) {
+      const dictMatch = await dictExact(text);
+      if (dictMatch) {
+        lastProvider = '📖 Sözlük';
+        setCached(cacheKey, dictMatch);
+        return dictMatch;
+      }
+    }
+
+    // AI ile bağlamlı çeviri — 8'li batch
+    const BATCH = 8;
     const results = new Array(blocks.length);
 
     for (let i = 0; i < blocks.length; i += BATCH) {
       const batch = blocks.slice(i, i + BATCH);
-      const nonEmpty = batch.filter(b => b.trim());
-      if (!nonEmpty.length) { batch.forEach((b, j) => { results[i + j] = b; }); continue; }
+      const nonEmpty = batch.map(b => b.trim() ? b : '');
+      const toTranslate = nonEmpty.filter(b => b.length > 0);
 
-      const combined = nonEmpty.join('\n');
-      const translated = await smartTranslate(combined, lang);
-      const lines = translated.split('\n');
-      let li = 0;
-      batch.forEach((b, j) => { results[i + j] = b.trim() ? (lines[li++] || b) : b; });
+      if (!toTranslate.length) {
+        batch.forEach((b, j) => { results[i + j] = b; });
+        continue;
+      }
+
+      // Sözlükten tam eşleşenleri ayır
+      const dictResults = await Promise.all(toTranslate.map(b => dictExact(b)));
+      const needsAI = toTranslate.filter((_, j) => dictResults[j] === null);
+      const aiIndices = toTranslate.map((_, j) => dictResults[j] === null ? j : -1).filter(j => j >= 0);
+
+      let aiTranslated = [];
+      if (needsAI.length > 0) {
+        aiTranslated = await translateBatch(needsAI, lang);
+      }
+
+      // Sonuçları birleştir
+      let aiIdx = 0;
+      let dictIdx = 0;
+      let trIdx = 0;
+
+      batch.forEach((b, j) => {
+        if (!b.trim()) {
+          results[i + j] = b;
+        } else {
+          const dMatch = dictResults[trIdx];
+          if (dMatch !== null) {
+            results[i + j] = dMatch;
+          } else {
+            results[i + j] = aiTranslated[aiIdx++] || b;
+          }
+          trIdx++;
+        }
+      });
 
       if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, 50));
     }
 
-    return results.join(isSRT ? sep : '\n');
+    const finalResult = results.join(isSRT ? sep : '\n');
+    setCached(cacheKey, finalResult);
+    return finalResult;
   }
 
   async function checkModelExists() { return true; }
