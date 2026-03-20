@@ -3,7 +3,7 @@
    Offline çalışma + cache yönetimi
    ============================================================ */
 
-const CACHE_NAME = 'ceviri-v1';
+const CACHE_NAME = 'ceviri-v3';
 
 // Cache'e alınacak dosyalar (uygulama kabuğu)
 const APP_SHELL = [
@@ -13,6 +13,7 @@ const APP_SHELL = [
   './file_handler.js',
   './translator.js',
   './app.js',
+  './ja_tr.json',
   'https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;700&family=Syne:wght@400;600;800&display=swap'
 ];
 
