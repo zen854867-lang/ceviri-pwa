@@ -12,27 +12,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download en-tr model
-        run: |
-          mkdir -p models/en-tr
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/onnx/decoder_model.onnx" -O models/en-tr/decoder_model.onnx
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/onnx/encoder_model.onnx" -O models/en-tr/encoder_model.onnx
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/tokenizer.json" -O models/en-tr/tokenizer.json
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/tokenizer_config.json" -O models/en-tr/tokenizer_config.json
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/vocab.json" -O models/en-tr/vocab.json
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/source.spm" -O models/en-tr/source.spm
-          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/target.spm" -O models/en-tr/target.spm
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-      - name: Download ja-en model
+      - name: Install dependencies
+        run: pip install huggingface-hub requests
+
+      - name: Download models
         run: |
-          mkdir -p models/ja-en
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/onnx/decoder_model.onnx" -O models/ja-en/decoder_model.onnx
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/onnx/encoder_model.onnx" -O models/ja-en/encoder_model.onnx
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/tokenizer.json" -O models/ja-en/tokenizer.json
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/tokenizer_config.json" -O models/ja-en/tokenizer_config.json
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/vocab.json" -O models/ja-en/vocab.json
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/source.spm" -O models/ja-en/source.spm
-          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/target.spm" -O models/ja-en/target.spm
+          python3 << 'PYEOF'
+          import os, requests
+          
+          def download(url, path):
+              os.makedirs(os.path.dirname(path), exist_ok=True)
+              r = requests.get(url, allow_redirects=True)
+              if r.status_code == 200:
+                  open(path, 'wb').write(r.content)
+                  print(f"OK: {path}")
+              else:
+                  print(f"SKIP: {url} -> {r.status_code}")
+          
+          base_en = "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main"
+          base_ja = "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main"
+          
+          files = ["onnx/encoder_model.onnx", "onnx/decoder_model.onnx", "tokenizer.json", "tokenizer_config.json", "vocab.json", "source.spm", "target.spm"]
+          
+          for f in files:
+              download(f"{base_en}/{f}", f"models/en-tr/{f}")
+              download(f"{base_ja}/{f}", f"models/ja-en/{f}")
+          PYEOF
 
       - name: Commit models
         env:
