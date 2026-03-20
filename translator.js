@@ -8,19 +8,16 @@ const Translator = (() => {
   window.addEventListener('online',  () => { isOnline = true; });
   window.addEventListener('offline', () => { isOnline = false; });
   function getIsOnline() { return isOnline; }
-
+  
   async function loadTransformers() {
     if (window.transformersPipeline) return window.transformersPipeline;
     return new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.type = 'module';
-      s.textContent = `
-        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-        window.transformersPipeline = pipeline;
-        window.dispatchEvent(new Event('transformers-ready'));
-      `;
-      document.head.appendChild(s);
-      window.addEventListener('transformers-ready', () => resolve(window.transformersPipeline), { once: true });
+      import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js')
+        .then(mod => {
+          window.transformersPipeline = mod.pipeline;
+          resolve(mod.pipeline);
+        })
+        .catch(reject);
       setTimeout(() => reject(new Error('Transformers yuklenemedi')), 60000);
     });
   }
