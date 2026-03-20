@@ -12,27 +12,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install huggingface-hub
-        run: pip install huggingface-hub
-
       - name: Download en-tr model
         run: |
-          python3 -c "
-          from huggingface_hub import snapshot_download
-          snapshot_download('Xenova/opus-mt-en-tr', local_dir='models/en-tr')
-          "
+          mkdir -p models/en-tr
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/onnx/decoder_model.onnx" -O models/en-tr/decoder_model.onnx
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/onnx/encoder_model.onnx" -O models/en-tr/encoder_model.onnx
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/tokenizer.json" -O models/en-tr/tokenizer.json
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/tokenizer_config.json" -O models/en-tr/tokenizer_config.json
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/vocab.json" -O models/en-tr/vocab.json
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/source.spm" -O models/en-tr/source.spm
+          wget -q "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main/target.spm" -O models/en-tr/target.spm
 
       - name: Download ja-en model
         run: |
-          python3 -c "
-          from huggingface_hub import snapshot_download
-          snapshot_download('Xenova/opus-mt-ja-en', local_dir='models/ja-en')
-          "
+          mkdir -p models/ja-en
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/onnx/decoder_model.onnx" -O models/ja-en/decoder_model.onnx
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/onnx/encoder_model.onnx" -O models/ja-en/encoder_model.onnx
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/tokenizer.json" -O models/ja-en/tokenizer.json
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/tokenizer_config.json" -O models/ja-en/tokenizer_config.json
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/vocab.json" -O models/ja-en/vocab.json
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/source.spm" -O models/ja-en/source.spm
+          wget -q "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main/target.spm" -O models/ja-en/target.spm
 
       - name: Commit models
         env:
