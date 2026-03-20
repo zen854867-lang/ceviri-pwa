@@ -89,9 +89,9 @@
         <span class="btn-text">Çevir</span>
         <span class="btn-icon">→</span>
       </button>
-      <div class="mode-badge" id="mode-badge">
-        <span id="mode-text">— mod</span>
-      </div>
+     <div class="mode-badge" id="mode-badge" onclick="toggleMode()" style="cursor:pointer" title="Moda tıkla: Groq/Google">
+  <span id="mode-text">— mod</span>
+    </div>
     </div>
 
     <!-- Yükleniyor -->
@@ -135,7 +135,12 @@
         .then(() => console.log('SW kayıtlı'))
         .catch(e => console.warn('SW hatası:', e));
     }
-  </script>
+  </script> <script>
+function toggleMode() {
+  const current = Translator.getMode();
+  Translator.setMode(current === 'groq' ? 'google' : 'groq');
+}
+</script>
 
 </body>
 </html>
