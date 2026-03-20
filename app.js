@@ -43,6 +43,7 @@
   window.addEventListener('online',  updateStatus);
   window.addEventListener('offline', updateStatus);
   updateStatus();
+  setInterval(updateStatus, 2000);
 
   /* ---------- Dil seçimi ---------- */
   function setLang(lang) {
