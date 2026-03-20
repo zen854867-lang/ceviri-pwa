@@ -1,44 +1,41 @@
-name: Build APK
+name: Download Models
 
 on:
-  push:
-    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  download:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          node-version: '20'
+          python-version: '3.11'
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install huggingface-hub
+        run: pip install huggingface-hub
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Add Android platform
-        run: npx cap add android
-
-      - name: Build APK
+      - name: Download en-tr model
         run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          python3 -c "
+          from huggingface_hub import snapshot_download
+          snapshot_download('Xenova/opus-mt-en-tr', local_dir='models/en-tr')
+          "
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ceviri-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Download ja-en model
+        run: |
+          python3 -c "
+          from huggingface_hub import snapshot_download
+          snapshot_download('Xenova/opus-mt-ja-en', local_dir='models/ja-en')
+          "
+
+      - name: Commit models
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add models/
+          git commit -m "Add offline models"
+          git push
