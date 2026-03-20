@@ -1,6 +1,5 @@
 (async () => {
-
-  const $  = id => document.getElementById(id);
+  const $ = id => document.getElementById(id);
   const statusDot    = $('status-dot');
   const statusText   = $('status-text');
   const btnEn        = $('btn-en');
@@ -28,44 +27,34 @@
   let lastOutput    = '';
   let lastSRTBlocks = null;
 
-  /* ---------- Durum göstergesi ---------- */
+  /* ---------- Durum ---------- */
   function updateStatus() {
-    const online = Translator.getIsOnline();
-    const modelsReady = Translator.isModelsReady();
+    const online = navigator.onLine;
     statusDot.className = `dot dot--${online ? 'online' : 'offline'}`;
-    statusText.textContent = online
-      ? `Online — Google Translate${modelsReady ? ' | Offline ✅' : ''}`
-      : (modelsReady ? 'Offline — Yerel Model ✅' : 'Offline — Model hazır değil ⚠️');
+    statusText.textContent = online ? 'Online — Google Translate' : 'Offline — Yerel Sözlük ✅';
     modeBadge.className = `mode-badge ${online ? 'online' : 'offline'}`;
     modeText.textContent = online ? '🌐 Online mod' : '📴 Offline mod';
   }
 
   window.addEventListener('online',  updateStatus);
   window.addEventListener('offline', updateStatus);
+  setInterval(updateStatus, 1000);
   updateStatus();
-  setInterval(updateStatus, 2000);
 
-  /* ---------- Dil seçimi ---------- */
+  /* ---------- Dil ---------- */
   function setLang(lang) {
     selectedLang = lang;
     btnEn.classList.toggle('selected', lang === 'en');
     btnJa.classList.toggle('selected', lang === 'ja');
-    inputText.placeholder = lang === 'ja'
-      ? 'Japonca metin buraya... (例: こんにちは)'
-      : 'İngilizce metin buraya...';
+    inputText.placeholder = lang === 'ja' ? 'Japonca metin buraya...' : 'İngilizce metin buraya...';
   }
   btnEn.addEventListener('click', () => setLang('en'));
   btnJa.addEventListener('click', () => setLang('ja'));
   setLang('en');
 
-  /* ---------- Metin girişi ---------- */
+  /* ---------- Metin ---------- */
   inputText.addEventListener('input', () => {
     charCount.textContent = inputText.value.length;
-    if (currentFile && inputText.value !== currentFile.raw) {
-      currentFile = null;
-      fileInfo.textContent = '';
-      fileInfo.classList.add('hidden');
-    }
     hideError();
   });
 
@@ -74,11 +63,8 @@
       const text = await navigator.clipboard.readText();
       inputText.value = text;
       charCount.textContent = text.length;
-      currentFile = null;
       hideError();
-    } catch {
-      showError('Pano erişimi reddedildi.');
-    }
+    } catch { showError('Pano erişimi reddedildi.'); }
   });
 
   btnClear.addEventListener('click', () => {
@@ -92,11 +78,8 @@
     hideError();
   });
 
-  /* ---------- Dosya yükleme ---------- */
-  fileInput.addEventListener('change', e => {
-    if (e.target.files[0]) handleFile(e.target.files[0]);
-  });
-
+  /* ---------- Dosya ---------- */
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
   fileZone.addEventListener('dragover', e => { e.preventDefault(); fileZone.classList.add('drag-over'); });
   fileZone.addEventListener('dragleave', () => fileZone.classList.remove('drag-over'));
   fileZone.addEventListener('drop', e => {
@@ -114,21 +97,17 @@
       const isSRT = result.type === 'srt' || result.raw.match(/^\d+\s*\n\d{2}:\d{2}:\d{2}/m);
       if (isSRT) {
         const blocks = FileHandler.parseSRT(result.raw);
-        if (blocks.length === 0) throw new Error('SRT dosyasında geçerli blok bulunamadı.');
+        if (!blocks.length) throw new Error('SRT dosyasında geçerli blok bulunamadı.');
         lastSRTBlocks = blocks;
-        const plainText = FileHandler.srtToPlainLines(blocks);
-        inputText.value = plainText;
-        charCount.textContent = plainText.length;
+        inputText.value = FileHandler.srtToPlainLines(blocks);
+        charCount.textContent = inputText.value.length;
         showFileInfo(`📄 ${file.name} — ${blocks.length} altyazı bloğu yüklendi`);
       } else {
-        const text = FileHandler.processTXT(result.raw);
-        inputText.value = text;
-        charCount.textContent = text.length;
+        inputText.value = FileHandler.processTXT(result.raw);
+        charCount.textContent = inputText.value.length;
         showFileInfo(`📄 ${file.name} yüklendi`);
       }
-    } catch (err) {
-      showError(err.message);
-    }
+    } catch (err) { showError(err.message); }
   }
 
   function showFileInfo(msg) {
@@ -137,20 +116,23 @@
   }
 
   /* ---------- Çeviri ---------- */
-  btnTranslate.addEventListener('click', startTranslation);
-
-  async function startTranslation() {
+  btnTranslate.addEventListener('click', async () => {
     const text = inputText.value.trim();
-    if (!text) { showError('Lütfen çevirmek istediğin metni gir.'); return; }
+    if (!text) { showError('Metin gir.'); return; }
     setLoading(true);
     hideError();
     outputPanel.classList.add('hidden');
     try {
       const translated = await Translator.translate(text, selectedLang);
       if (lastSRTBlocks) {
-        const translatedBlocks = FileHandler.applyTranslationToSRT(lastSRTBlocks, translated);
-        lastOutput = FileHandler.buildSRT(translatedBlocks);
-        renderSRT(translatedBlocks);
+        const tb = FileHandler.applyTranslationToSRT(lastSRTBlocks, translated);
+        lastOutput = FileHandler.buildSRT(tb);
+        outputText.innerHTML = tb.map(b => `
+          <div class="srt-block">
+            <div class="srt-index">#${b.index}</div>
+            <div class="srt-time">${b.time}</div>
+            <div class="srt-text">${b.translated.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+          </div>`).join('');
       } else {
         lastOutput = translated;
         outputText.textContent = translated;
@@ -161,21 +143,7 @@
     } finally {
       setLoading(false);
     }
-  }
-
-  function renderSRT(blocks) {
-    outputText.innerHTML = blocks.map(b => `
-      <div class="srt-block">
-        <div class="srt-index">#${b.index}</div>
-        <div class="srt-time">${b.time}</div>
-        <div class="srt-text">${escapeHTML(b.translated)}</div>
-      </div>
-    `).join('');
-  }
-
-  function escapeHTML(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  });
 
   /* ---------- Kopyala / İndir ---------- */
   btnCopy.addEventListener('click', async () => {
@@ -184,9 +152,7 @@
       await navigator.clipboard.writeText(lastOutput);
       btnCopy.textContent = '✅';
       setTimeout(() => { btnCopy.textContent = '📄'; }, 1500);
-    } catch {
-      showError('Kopyalama başarısız.');
-    }
+    } catch { showError('Kopyalama başarısız.'); }
   });
 
   btnDownload.addEventListener('click', () => {
@@ -201,32 +167,10 @@
     btnTranslate.querySelector('.btn-text').textContent = active ? 'Çevriliyor...' : 'Çevir';
   }
 
-  function showError(msg) {
-    errorMsg.textContent = msg;
-    errorBox.classList.remove('hidden');
-  }
+  function showError(msg) { errorMsg.textContent = msg; errorBox.classList.remove('hidden'); }
+  function hideError() { errorBox.classList.add('hidden'); errorMsg.textContent = ''; }
 
-  function hideError() {
-    errorBox.classList.add('hidden');
-    errorMsg.textContent = '';
-  }
-
-  /* ---------- Model ön yükleme ---------- */
-  async function preloadModels() {
-    if (!Translator.getIsOnline()) return;
-    showError('📥 Offline model indiriliyor... (~300MB, bekleyin)');
-    try {
-      await Translator.preloadModel();
-      hideError();
-      showError('✅ Offline model hazır!');
-      updateStatus();
-      setTimeout(hideError, 3000);
-    } catch(e) {
-      hideError();
-      console.warn('Model indirilemedi:', e);
-    }
-  }
-
-  preloadModels();
+  // Sözlüğü arka planda yükle
+  Translator.preloadModel();
 
 })();
