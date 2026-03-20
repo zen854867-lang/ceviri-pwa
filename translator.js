@@ -10,16 +10,10 @@ const Translator = (() => {
   function getIsOnline() { return isOnline; }
   
   async function loadTransformers() {
-    if (window.transformersPipeline) return window.transformersPipeline;
-    return new Promise((resolve, reject) => {
-      import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js')
-        .then(mod => {
-          window.transformersPipeline = mod.pipeline;
-          resolve(mod.pipeline);
-        })
-        .catch(reject);
-      setTimeout(() => reject(new Error('Transformers yuklenemedi')), 60000);
-    });
+    if (window.pipeline) return window.pipeline;
+    await new Promise(r => setTimeout(r, 500));
+    if (window.pipeline) return window.pipeline;
+    throw new Error('Transformers yuklenemedi');
   }
 
   async function loadModels() {
