@@ -1,59 +1,53 @@
-name: Download Models
+name: Build APK
 
 on:
+  push:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  download:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: '3.11'
+          node-version: '20'
 
       - name: Install dependencies
-        run: pip install huggingface-hub requests
+        run: npm install
 
-      - name: Download models
-        run: |
-          python3 << 'PYEOF'
-          import os, requests
-          
-          def download(url, path):
-              os.makedirs(os.path.dirname(path), exist_ok=True)
-              r = requests.get(url, allow_redirects=True)
-              if r.status_code == 200:
-                  open(path, 'wb').write(r.content)
-                  print(f"OK: {path}")
-              else:
-                  print(f"SKIP: {url} -> {r.status_code}")
-          
-          base_en = "https://huggingface.co/Xenova/opus-mt-en-tr/resolve/main"
-          base_ja = "https://huggingface.co/Xenova/opus-mt-ja-en/resolve/main"
-          
-          files = ["onnx/encoder_model.onnx", "onnx/decoder_model.onnx", "tokenizer.json", "tokenizer_config.json", "vocab.json", "source.spm", "target.spm"]
-          
-          for f in files:
-              download(f"{base_en}/{f}", f"models/en-tr/{f}")
-              download(f"{base_ja}/{f}", f"models/ja-en/{f}")
-          PYEOF
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Commit models
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare www folder
         run: |
-          git config user.email "action@github.com"
-          git config user.name "GitHub Action"
-          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}
-          git lfs install
-          git lfs track "*.onnx"
-          git add .gitattributes
-          git add models/
-          git commit -m "Add offline models" || echo "Nothing to commit"
-          git push
+          mkdir -p www
+          cp index.html style.css app.js translator.js file_handler.js manifest.json sw.js ja_tr.json www/
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync
+        run: npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ceviri-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
