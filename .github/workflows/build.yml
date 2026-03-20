@@ -44,7 +44,7 @@ jobs:
               download(f"{base_ja}/{f}", f"models/ja-en/{f}")
           PYEOF
 
-       - name: Commit models
+      - name: Commit models
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
