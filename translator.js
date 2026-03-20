@@ -34,13 +34,15 @@ const Translator = (() => {
     modelsLoading = true;
     try {
       const pipeline = await loadTransformers();
-      if (!pipelineJaEn) pipelineJaEn = await pipeline('translation', 'Xenova/opus-mt-ja-en');
-      if (!pipelineEnTr) pipelineEnTr = await pipeline('translation', 'Xenova/opus-mt-en-tr');
+      const base = 'https://zen854867-lang.github.io/ceviri-pwa/models';
+      if (!pipelineJaEn) pipelineJaEn = await pipeline('translation', `${base}/ja-en`);
+      if (!pipelineEnTr) pipelineEnTr = await pipeline('translation', `${base}/en-tr`);
       modelsReady = true;
     } finally {
       modelsLoading = false;
     }
   }
+  
 
   async function offlineTranslate(text, sourceLang) {
     await loadModels();
