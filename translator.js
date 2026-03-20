@@ -1,14 +1,12 @@
 const Translator = (() => {
   let isOnline = navigator.onLine;
-  let pipelineEn = null;
-  let pipelineJa = null;
-  let modelLoading = false;
+  let pipelineJaEn = null;
+  let pipelineEnTr = null;
 
   window.addEventListener('online',  () => { isOnline = true; });
   window.addEventListener('offline', () => { isOnline = false; });
   function getIsOnline() { return isOnline; }
 
-  // Transformers.js CDN
   async function loadTransformers() {
     if (window.transformersPipeline) return window.transformersPipeline;
     return new Promise((resolve, reject) => {
@@ -21,25 +19,27 @@ const Translator = (() => {
       `;
       document.head.appendChild(s);
       window.addEventListener('transformers-ready', () => resolve(window.transformersPipeline), { once: true });
-      setTimeout(() => reject(new Error('Transformers yüklenemedi')), 30000);
+      setTimeout(() => reject(new Error('Transformers yuklenemedi')), 30000);
     });
   }
 
-  async function loadModel(sourceLang) {
+  async function loadModels() {
     const pipeline = await loadTransformers();
-    if (sourceLang === 'en' && !pipelineEn) {
-      pipelineEn = await pipeline('translation', 'Xenova/opus-mt-en-tr');
-    }
-    if (sourceLang === 'ja' && !pipelineJa) {
-      pipelineJa = await pipeline('translation', 'Xenova/opus-mt-ja-tr');
-    }
-    return sourceLang === 'en' ? pipelineEn : pipelineJa;
+    if (!pipelineJaEn) pipelineJaEn = await pipeline('translation', 'Xenova/opus-mt-ja-en');
+    if (!pipelineEnTr) pipelineEnTr = await pipeline('translation', 'Xenova/opus-mt-en-tr');
   }
 
   async function offlineTranslate(text, sourceLang) {
-    const translator = await loadModel(sourceLang);
-    const result = await translator(text, { max_new_tokens: 512 });
-    return result[0].translation_text;
+    await loadModels();
+    if (sourceLang === 'ja') {
+      const enResult = await pipelineJaEn(text, { max_new_tokens: 512 });
+      const enText = enResult[0].translation_text;
+      const trResult = await pipelineEnTr(enText, { max_new_tokens: 512 });
+      return trResult[0].translation_text;
+    } else {
+      const result = await pipelineEnTr(text, { max_new_tokens: 512 });
+      return result[0].translation_text;
+    }
   }
 
   async function googleTranslate(text, sourceLang) {
@@ -48,7 +48,7 @@ const Translator = (() => {
       client: 'gtx', sl: sourceLang, tl: 'tr', dt: 't', q: text
     });
     const res = await fetch('https://translate.googleapis.com/translate_a/single?' + params);
-    if (!res.ok) throw new Error('Çeviri hatası: ' + res.status);
+    if (!res.ok) throw new Error('Ceviri hatasi: ' + res.status);
     const data = await res.json();
     if (!data || !data[0]) return text;
     return data[0].filter(i => i && i[0]).map(i => i[0]).join('');
@@ -71,34 +71,16 @@ const Translator = (() => {
   }
 
   async function translate(text, sourceLang) {
-    if (!text || !text.trim()) throw new Error('Metin boş.');
+    if (!text || !text.trim()) throw new Error('Metin bos.');
     if (!['en', 'ja'].includes(sourceLang)) throw new Error('Desteklenmeyen dil.');
-
     const useOffline = !isOnline;
-    if (useOffline && modelLoading) throw new Error('Model yükleniyor, bekle...');
-
     const sep = '\n|||SEP|||\n';
     const blocks = text.includes('|||SEP|||') ? text.split(sep) : text.split('\n');
     const translated = await translateBlocks(blocks, sourceLang, useOffline);
     return translated.join(text.includes('|||SEP|||') ? sep : '\n');
   }
 
-  async function checkModelExists(pair) {
-    return false;
-  }
+  async function checkModelExists() { return false; }
 
-  // Arka planda modeli yükle
-  async function preloadModel(sourceLang) {
-    if (!isOnline) return;
-    modelLoading = true;
-    try {
-      await loadModel(sourceLang);
-    } catch(e) {
-      console.warn('Model yüklenemedi:', e);
-    } finally {
-      modelLoading = false;
-    }
-  }
-
-  return { translate, getIsOnline, checkModelExists, preloadModel };
+  return { translate, getIsOnline, checkModelExists };
 })();
