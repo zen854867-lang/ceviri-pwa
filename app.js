@@ -28,18 +28,33 @@
   let lastSRTBlocks = null;
 
   /* ---------- Durum ---------- */
-   function updateStatus() {
+  function updateStatus() {
     const online = navigator.onLine;
+    const provider = Translator.getLastProvider();
+    const mode = Translator.getMode();
     statusDot.className = `dot dot--${online ? 'online' : 'offline'}`;
-    statusText.textContent = online ? `Online — ${Translator.getLastProvider()}` : 'Offline — Yerel Sözlük ✅';
+    statusText.textContent = online
+      ? `Online — ${provider !== '-' ? provider : 'Hazır'}`
+      : 'Offline — Yerel Sözlük ✅';
     modeBadge.className = `mode-badge ${online ? 'online' : 'offline'}`;
-    modeText.textContent = online ? `🤖 ${Translator.getLastProvider()}` : '📴 Offline';
+    modeText.textContent = online
+      ? (mode === 'google' ? '🌐 Google' : '🤖 Auto AI')
+      : '📴 Offline';
   }
 
   window.addEventListener('online',  updateStatus);
   window.addEventListener('offline', updateStatus);
   setInterval(updateStatus, 1000);
   updateStatus();
+
+  /* ---------- Mod toggle ---------- */
+  modeBadge.style.cursor = 'pointer';
+  modeBadge.title = 'Tıkla: Auto AI / Google';
+  modeBadge.addEventListener('click', () => {
+    const current = Translator.getMode();
+    Translator.setMode(current === 'auto' ? 'google' : 'auto');
+    updateStatus();
+  });
 
   /* ---------- Dil ---------- */
   function setLang(lang) {
@@ -138,6 +153,7 @@
         outputText.textContent = translated;
       }
       outputPanel.classList.remove('hidden');
+      updateStatus();
     } catch (err) {
       showError(`Çeviri başarısız: ${err.message}`);
     } finally {
@@ -170,8 +186,6 @@
   function showError(msg) { errorMsg.textContent = msg; errorBox.classList.remove('hidden'); }
   function hideError() { errorBox.classList.add('hidden'); errorMsg.textContent = ''; }
 
-  // Sözlüğü arka planda yükle
   Translator.preloadModel();
-
 })();
     
