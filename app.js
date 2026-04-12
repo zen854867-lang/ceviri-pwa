@@ -1,5 +1,7 @@
 (async () => {
   const $ = id => document.getElementById(id);
+  
+  // UI Elementleri
   const statusDot    = $('status-dot');
   const statusText   = $('status-text');
   const btnEn        = $('btn-en');
@@ -21,42 +23,150 @@
   const btnDownload  = $('btn-download');
   const errorBox     = $('error-box');
   const errorMsg     = $('error-msg');
+  
+  // YENİ UI Elementleri
+  const offlineToggle = $('offline-toggle');
+  const offlineLabel = $('offline-label');
+  const providerSelect = $('provider-select');
+  const providerSelector = $('provider-selector');
+  const footerStatus = $('footer-status');
 
   let selectedLang  = 'en';
   let currentFile   = null;
   let lastOutput    = '';
   let lastSRTBlocks = null;
+  
+  // localStorage anahtarları
+  const STORAGE_KEYS = {
+    offline: 'translator_offline_mode',
+    provider: 'translator_provider'
+  };
 
-  /* ---------- Durum ---------- */
-  function updateStatus() {
-    const online = navigator.onLine;
-    const provider = Translator.getLastProvider();
-    const mode = Translator.getMode();
-    statusDot.className = `dot dot--${online ? 'online' : 'offline'}`;
-    statusText.textContent = online
-      ? `Online — ${provider !== '-' ? provider : 'Hazır'}`
-      : 'Offline — Yerel Sözlük ✅';
-    modeBadge.className = `mode-badge ${online ? 'online' : 'offline'}`;
-    modeText.textContent = online
-      ? (mode === 'google' ? '🌐 Google' : '🤖 Auto AI')
-      : '📴 Offline';
+  /* ---------- localStorage Yönetimi ---------- */
+  function loadSettings() {
+    // Offline mod tercihi
+    const savedOffline = localStorage.getItem(STORAGE_KEYS.offline);
+    if (savedOffline !== null) {
+      offlineToggle.checked = savedOffline === 'true';
+    }
+    
+    // Sağlayıcı tercihi
+    const savedProvider = localStorage.getItem(STORAGE_KEYS.provider);
+    if (savedProvider) {
+      providerSelect.value = savedProvider;
+    }
+    
+    // Ayarları uygula
+    applyMode();
   }
 
-  window.addEventListener('online',  updateStatus);
-  window.addEventListener('offline', updateStatus);
-  setInterval(updateStatus, 1000);
-  updateStatus();
+  function saveSettings() {
+    localStorage.setItem(STORAGE_KEYS.offline, offlineToggle.checked);
+    localStorage.setItem(STORAGE_KEYS.provider, providerSelect.value);
+  }
 
-  /* ---------- Mod toggle ---------- */
-  modeBadge.style.cursor = 'pointer';
-  modeBadge.title = 'Tıkla: Auto AI / Google';
-  modeBadge.addEventListener('click', () => {
-    const current = Translator.getMode();
-    Translator.setMode(current === 'auto' ? 'google' : 'auto');
+  /* ---------- Mod Uygulama ---------- */
+  function applyMode() {
+    const isOffline = offlineToggle.checked;
+    const provider = providerSelect.value;
+    
+    // Translator modunu ayarla
+    if (isOffline) {
+      Translator.setMode('offline');
+    } else {
+      Translator.setMode(provider);
+    }
+    
+    // UI güncelle
+    updateUIForMode(isOffline, provider);
+    updateStatus();
+    
+    // Ayarları kaydet
+    saveSettings();
+  }
+
+  function updateUIForMode(isOffline, provider) {
+    // Offline etiketi
+    offlineLabel.textContent = isOffline ? '📴 Offline Mod Aktif' : '🌐 Online Mod Aktif';
+    
+    // Sağlayıcı seçici (offline'da devre dışı)
+    if (providerSelector) {
+      providerSelector.style.opacity = isOffline ? '0.5' : '1';
+      providerSelect.disabled = isOffline;
+    }
+    
+    // Mode badge
+    if (isOffline) {
+      modeBadge.className = 'mode-badge offline';
+      modeText.textContent = '📴 Offline';
+    } else {
+      modeBadge.className = 'mode-badge online';
+      const providerNames = {
+        'auto': '⚡ Otomatik',
+        'groq': '🚀 Groq',
+        'openai': '🧠 GPT-4o-mini',
+        'openrouter': '🌐 OpenRouter',
+        'google': '🔤 Google'
+      };
+      modeText.textContent = providerNames[provider] || provider;
+    }
+    
+    // Footer durumu
+    if (footerStatus) {
+      if (isOffline) {
+        footerStatus.textContent = '📴 Offline mod · Sadece yerel sözlük kullanılıyor';
+      } else {
+        const providerName = providerSelect.options[providerSelect.selectedIndex]?.text || provider;
+        footerStatus.textContent = `🌐 Online mod · Sağlayıcı: ${providerName}`;
+      }
+    }
+  }
+
+  /* ---------- Durum Güncelleme (Bağlantı + Mod) ---------- */
+  function updateStatus() {
+    const online = navigator.onLine;
+    const isOfflineMode = offlineToggle.checked;
+    const provider = Translator.getLastProvider();
+    
+    // Bağlantı noktası
+    statusDot.className = `dot dot--${online ? 'online' : 'offline'}`;
+    
+    // Durum metni
+    if (!online) {
+      statusText.textContent = 'Offline — İnternet bağlantısı yok';
+    } else if (isOfflineMode) {
+      statusText.textContent = 'Offline Mod — Yerel Sözlük Kullanılıyor';
+    } else {
+      statusText.textContent = `Online — ${provider !== '-' ? provider : 'Hazır'}`;
+    }
+  }
+
+  /* ---------- Event Listeners ---------- */
+  // Offline toggle
+  offlineToggle.addEventListener('change', () => {
+    applyMode();
     updateStatus();
   });
+  
+  // Sağlayıcı seçimi
+  providerSelect.addEventListener('change', () => {
+    if (!offlineToggle.checked) {
+      applyMode();
+      updateStatus();
+    }
+  });
+  
+  // Online/offline bağlantı değişimi
+  window.addEventListener('online', () => {
+    updateStatus();
+    // İnternet geri geldiyse offline modu otomatik kapatma (kullanıcı tercihine saygı)
+  });
+  window.addEventListener('offline', updateStatus);
+  
+  // Periyodik durum güncelleme (son sağlayıcıyı göstermek için)
+  setInterval(updateStatus, 1000);
 
-  /* ---------- Dil ---------- */
+  /* ---------- Dil Seçimi ---------- */
   function setLang(lang) {
     selectedLang = lang;
     btnEn.classList.toggle('selected', lang === 'en');
@@ -67,7 +177,7 @@
   btnJa.addEventListener('click', () => setLang('ja'));
   setLang('en');
 
-  /* ---------- Metin ---------- */
+  /* ---------- Metin İşlemleri ---------- */
   inputText.addEventListener('input', () => {
     charCount.textContent = inputText.value.length;
     hideError();
@@ -93,7 +203,7 @@
     hideError();
   });
 
-  /* ---------- Dosya ---------- */
+  /* ---------- Dosya İşlemleri ---------- */
   fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
   fileZone.addEventListener('dragover', e => { e.preventDefault(); fileZone.classList.add('drag-over'); });
   fileZone.addEventListener('dragleave', () => fileZone.classList.remove('drag-over'));
@@ -134,11 +244,20 @@
   btnTranslate.addEventListener('click', async () => {
     const text = inputText.value.trim();
     if (!text) { showError('Metin gir.'); return; }
+    
+    // Offline modda internet yoksa uyarı (ama çeviriye izin ver)
+    if (offlineToggle.checked && !navigator.onLine) {
+      // Bu durum normal, sadece bilgi ver
+      console.log('Offline mod: İnternet yok, yerel sözlük kullanılacak.');
+    }
+    
     setLoading(true);
     hideError();
     outputPanel.classList.add('hidden');
+    
     try {
       const translated = await Translator.translate(text, selectedLang);
+      
       if (lastSRTBlocks) {
         const tb = FileHandler.applyTranslationToSRT(lastSRTBlocks, translated);
         lastOutput = FileHandler.buildSRT(tb);
@@ -153,7 +272,7 @@
         outputText.textContent = translated;
       }
       outputPanel.classList.remove('hidden');
-      updateStatus();
+      updateStatus(); // Sağlayıcı bilgisi güncellensin
     } catch (err) {
       showError(`Çeviri başarısız: ${err.message}`);
     } finally {
@@ -176,16 +295,28 @@
     FileHandler.downloadFile(lastOutput, currentFile ? currentFile.name : 'ceviri.txt', '_tr');
   });
 
-  /* ---------- Yardımcı ---------- */
+  /* ---------- Yardımcı Fonksiyonlar ---------- */
   function setLoading(active) {
     btnTranslate.disabled = active;
     loader.classList.toggle('hidden', !active);
     btnTranslate.querySelector('.btn-text').textContent = active ? 'Çevriliyor...' : 'Çevir';
   }
 
-  function showError(msg) { errorMsg.textContent = msg; errorBox.classList.remove('hidden'); }
-  function hideError() { errorBox.classList.add('hidden'); errorMsg.textContent = ''; }
+  function showError(msg) { 
+    errorMsg.textContent = msg; 
+    errorBox.classList.remove('hidden'); 
+  }
+  
+  function hideError() { 
+    errorBox.classList.add('hidden'); 
+    errorMsg.textContent = ''; 
+  }
 
+  /* ---------- Başlangıç ---------- */
+  // Ayarları yükle ve uygula
+  loadSettings();
+  updateStatus();
+  
+  // Modelleri ön yükle (sözlük)
   Translator.preloadModel();
 })();
-    
