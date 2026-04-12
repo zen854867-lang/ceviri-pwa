@@ -83,15 +83,41 @@
       <div id="file-info" class="file-info hidden"></div>
     </section>
 
-    <!-- Çevir butonu -->
+    <!-- Çeviri Kontrolleri (Buton + Mod Seçiciler) -->
     <div class="translate-row">
       <button class="translate-btn" id="btn-translate">
         <span class="btn-text">Çevir</span>
         <span class="btn-icon">→</span>
       </button>
-     <div class="mode-badge" id="mode-badge" onclick="toggleMode()" style="cursor:pointer" title="Moda tıkla: Groq/Google">
-  <span id="mode-text">— mod</span>
-    </div>
+      
+      <!-- YENİ: Mod Seçici Alanı -->
+      <div class="mode-selector">
+        <!-- Offline Toggle Switch -->
+        <div class="toggle-container" title="Offline modda sadece yerel sözlük kullanılır, internet gerekmez.">
+          <label class="switch">
+            <input type="checkbox" id="offline-toggle" />
+            <span class="slider round"></span>
+          </label>
+          <span class="toggle-label" id="offline-label">📴 Offline</span>
+        </div>
+        
+        <!-- Sağlayıcı Seçimi (Sadece Online Modda Aktif) -->
+        <div class="provider-selector" id="provider-selector">
+          <span class="provider-label">Sağlayıcı:</span>
+          <select id="provider-select" class="provider-select">
+            <option value="auto">⚡ Otomatik</option>
+            <option value="groq">🚀 Groq</option>
+            <option value="openai">🧠 GPT-4o-mini</option>
+            <option value="openrouter">🌐 OpenRouter</option>
+            <option value="google">🔤 Google Translate</option>
+          </select>
+        </div>
+      </div>
+      
+      <!-- Mevcut Mod Badge'ı (gösterge) -->
+      <div class="mode-badge" id="mode-badge">
+        <span id="mode-text">⚡ Otomatik</span>
+      </div>
     </div>
 
     <!-- Yükleniyor -->
@@ -120,7 +146,7 @@
   </main>
 
   <footer class="footer">
-    <span>🌐 Online → Google Translate &nbsp;|&nbsp; 📴 Offline → Yerel Sözlük</span>
+    <span id="footer-status">🌐 Çevrimiçi mod · Sağlayıcı: Otomatik</span>
   </footer>
 
   <!-- Scripts -->
@@ -128,19 +154,13 @@
   <script src="translator.js"></script>
   <script src="app.js"></script>
 
-  <!-- Service Worker kaydı (sadece https veya localhost'ta çalışır) -->
+  <!-- Service Worker -->
   <script>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js')
         .then(() => console.log('SW kayıtlı'))
         .catch(e => console.warn('SW hatası:', e));
     }
-  </script> <script>
-function toggleMode() {
-  const current = Translator.getMode();
-  Translator.setMode(current === 'groq' ? 'google' : 'groq');
-}
-</script>
-
+  </script>
 </body>
 </html>
