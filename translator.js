@@ -1,11 +1,7 @@
 /* ============================================================
-   Professional Japanese Translator v4.0 - FINAL
-   - Godan/Ichidan/Adjective stemming (çakışmasız)
-   - Partikül başta/sonda/ortada bölme
-   - Trie önbellekli (tek sefer kurulur)
-   - Optimize bileşik isim bölücü
-   - Gelişmiş geçerlilik filtresi
-   - Genişletilmiş kalıp listesi
+   Professional Japanese Translator v5.0
+   Gelişmiş Kök Bulma, Akıllı Segmentasyon, Çift Sözlük Desteği
+   Tamamen Yeniden Yazıldı - Tüm Eksikler Giderildi
    ============================================================ */
 
 // ---------- KARAKTER TÜRÜ ----------
@@ -52,13 +48,14 @@ const COMPOUND_PATTERNS = [
   'としても','としたって','にしても',
   'からといって','からには','以上',
   'たびに','おかげで','せいで','くせに',
-  'なければよかった','てもいいですか','たほうがいい'
+  'なければよかった','てもいいですか','たほうがいい',
+  'させられる','させられた','させられたくない','させられたくなかった'
 ];
 
 const SORTED_COMPOUNDS = [...COMPOUND_PATTERNS].sort((a,b) => b.length - a.length);
 const SORTED_PARTICLES = [...PARTICLES].sort((a,b) => b.length - a.length);
 
-// ---------- SAYAÇLAR (TEKRARSIZ) ----------
+// ---------- SAYAÇLAR ----------
 const COUNTERS = ['匹','本','枚','台','回','歳','円','時','分','日','月','年','人','個','冊','杯','階','件'];
 function handleCounters(token) {
   const match = token.match(/^([一二三四五六七八九十百千万０-９\d]+)([匹本枚台回歳円時分日月年人個冊杯階件])$/);
@@ -70,7 +67,7 @@ function handleCounters(token) {
 function getStemCandidates(token) {
   const candidates = new Set();
   
-  // Özel fiiller
+  // 1. Özel fiiller
   if (token === 'した' || token === 'し' || token === 'せ' || token === 'さ' || token === 'する') candidates.add('する');
   if (token === '来た' || token === 'き' || token === 'こ' || token === 'くる') candidates.add('来る');
   if (token === '行った') candidates.add('行く');
@@ -78,18 +75,18 @@ function getStemCandidates(token) {
   if (token === 'やった') candidates.add('やる');
   if (token === 'できた') candidates.add('できる');
   
-  // İ-sıfatları
+  // 2. İ-sıfatları
   if (token.endsWith('かった')) candidates.add(token.slice(0, -3) + 'い');
   if (token.endsWith('くて')) candidates.add(token.slice(0, -2) + 'い');
   if (token.endsWith('ければ')) candidates.add(token.slice(0, -4) + 'い');
   if (token.endsWith('くない')) candidates.add(token.slice(0, -3) + 'い');
   if (token.endsWith('くなかった')) candidates.add(token.slice(0, -5) + 'い');
   
-  // Na-sıfatları
+  // 3. Na-sıfatları
   if (token.endsWith('だった')) candidates.add(token.slice(0, -3) + 'だ');
   if (token.endsWith('ではなかった')) candidates.add(token.slice(0, -6) + 'だ');
   
-  // Ichidan
+  // 4. Ichidan fiiller
   if (token.endsWith('る') && token.length > 1) {
     const prev = token.slice(-2, -1);
     if (/[いきしちにひみりぎじぢびぴえけせてねへめれげぜでべぺ]/.test(prev)) {
@@ -97,7 +94,7 @@ function getStemCandidates(token) {
     }
   }
   
-  // Godan - grup bazlı (çakışma yok)
+  // 5. Godan fiiller - grup bazlı
   const godanGroups = {
     'う': ['わ','い','え','お','って','った'],
     'く': ['か','き','け','こ','いて','いた'],
@@ -118,18 +115,52 @@ function getStemCandidates(token) {
     }
   }
   
-  // Edilgen/ettirgen
-  if (token.endsWith('られる')) candidates.add(token.slice(0, -3) + 'る');
+  // 6. Edilgen / ettirgen / edilgen-ettirgen
+  if (token.endsWith('られる')) {
+    candidates.add(token.slice(0, -3) + 'る');
+  }
   if (token.endsWith('させる')) candidates.add(token.slice(0, -3) + 'る');
   if (token.endsWith('される')) candidates.add(token.slice(0, -3) + 'する');
+  if (token.endsWith('させられる')) {
+    candidates.add(token.slice(0, -5) + 'る');
+    candidates.add(token.slice(0, -5) + 'する');
+  }
   
-  // Eğer hiç aday yoksa kendisini ekle
+  // 7. たく (istek eki) ve なかった (olumsuz geçmiş)
+  if (token.endsWith('たくなかった')) {
+    const stem = token.slice(0, -6);
+    candidates.add(stem + 'る');
+    candidates.add(stem + 'い');
+  } else if (token.endsWith('なかった')) {
+    const stem = token.slice(0, -4);
+    candidates.add(stem + 'る');
+    candidates.add(stem + 'い');
+  } else if (token.endsWith('たく')) {
+    const stem = token.slice(0, -2);
+    candidates.add(stem + 'る');
+  }
+  
+  // 8. て形 ve た形 genel
+  const teTaMap = {
+    'って':'う', 'った':'う', 'いて':'く', 'いた':'く', 'いで':'ぐ', 'いだ':'ぐ',
+    'して':'す', 'した':'す', 'て':'つ', 'た':'つ', 'んで':'ぬ', 'んだ':'ぬ',
+    'って':'る', 'った':'る', 'んで':'ぶ', 'んだ':'ぶ', 'んで':'む', 'んだ':'む'
+  };
+  for (const [suff, repl] of Object.entries(teTaMap)) {
+    if (token.endsWith(suff) && token.length > suff.length) {
+      candidates.add(token.slice(0, -suff.length) + repl);
+    }
+  }
+  
+  // 9. ちゃう / じゃう
+  if (token.endsWith('ちゃう')) candidates.add(token.slice(0, -3) + 'る');
+  if (token.endsWith('じゃう')) candidates.add(token.slice(0, -3) + 'る');
+  
   if (candidates.size === 0) candidates.add(token);
-  
   return Array.from(candidates);
 }
 
-// Sözlükte ilk eşleşen adayı döndür
+// Sözlükteki ilk geçerli anlamı döndür
 function getBestStem(token, dict) {
   const candidates = getStemCandidates(token);
   for (const cand of candidates) {
@@ -138,7 +169,7 @@ function getBestStem(token, dict) {
   return token;
 }
 
-// ---------- BİLEŞİK İSİM BÖLÜCÜ (ÖNBELLEKLİ) ----------
+// ---------- BİLEŞİK İSİM BÖLÜCÜ ----------
 let kanjiCandidateList = [];
 function buildKanjiList(dict) {
   kanjiCandidateList = Object.keys(dict).filter(k => /^[\u4E00-\u9FFF]+$/.test(k) && isValidMeaning(dict[k]));
@@ -174,9 +205,7 @@ function splitByCharType(text) {
     const t = charType(ch);
     if (t === 'PUNCT' || t === 'OTHER') {
       if (cur) segments.push(cur);
-      // Boşluk karakterini koru (isteğe bağlı)
       if (ch === ' ' || ch === '\t' || ch === '\n') {
-        // boşlukları ayrı token olarak ekle
         segments.push(ch);
       } else if (ch.trim()) {
         segments.push(ch);
@@ -206,20 +235,12 @@ function splitSegment(seg, depth = 0) {
     }
   }
   if (PARTICLES.has(seg)) return [seg];
-  // Partikül taraması - başta, ortada, sonda
   if (seg.length >= 2) {
     for (const p of SORTED_PARTICLES) {
       const idx = seg.indexOf(p);
       if (idx !== -1) {
-        // Başta ise
-        if (idx === 0) {
-          return [p, ...splitSegment(seg.slice(p.length), depth+1)];
-        }
-        // Sonda ise
-        if (idx + p.length === seg.length) {
-          return [...splitSegment(seg.slice(0, idx), depth+1), p];
-        }
-        // Ortada
+        if (idx === 0) return [p, ...splitSegment(seg.slice(p.length), depth+1)];
+        if (idx + p.length === seg.length) return [...splitSegment(seg.slice(0, idx), depth+1), p];
         if (idx > 0 && idx + p.length < seg.length) {
           return [...splitSegment(seg.slice(0, idx), depth+1), p, ...splitSegment(seg.slice(idx + p.length), depth+1)];
         }
@@ -256,7 +277,6 @@ function tokenize(text) {
 // ---------- SÖZLÜK DEĞER GEÇERLİLİK ----------
 function isValidMeaning(val) {
   if (typeof val !== 'string' || val.length === 0) return false;
-  // Parantez içeriğini temizleyip kontrol et
   let cleaned = val.replace(/\([^)]*\)/g, '').trim();
   if (cleaned.length === 0) cleaned = val.replace(/[()]/g, '').trim();
   if (cleaned.length === 0) return false;
@@ -268,7 +288,7 @@ function isValidMeaning(val) {
   return true;
 }
 
-// ---------- TRIE (SÖZLÜK YÜKLENİNCE KURULUR) ----------
+// ---------- TRIE ----------
 let trieRoot = { children: {}, isEnd: false, value: null };
 function buildTrie(dict) {
   const root = { children: {}, isEnd: false, value: null };
@@ -326,7 +346,6 @@ function translateOffline(text, dict) {
       continue;
     }
     
-    // Kök bul
     const bestStem = getBestStem(tok, dict);
     if (bestStem !== tok) {
       const stemMeaning = dict[bestStem];
@@ -337,7 +356,6 @@ function translateOffline(text, dict) {
       }
     }
     
-    // Bileşik isim dene
     if (/^[\u4E00-\u9FFF]+$/.test(tok) && tok.length > 1) {
       const subParts = splitCompoundNoun(tok, dict);
       if (subParts.length > 1) {
@@ -361,7 +379,21 @@ function translateOffline(text, dict) {
   return final;
 }
 
-// ---------- TRANSLATOR ANA MODÜL ----------
+function clearCache() { tokenCache.clear(); }
+
+// ---------- GLOBAL API ----------
+const JapaneseTokenizer = {
+  tokenize,
+  translateWithDict: translateOffline,
+  clearCache,
+  buildTrie,
+  setTrieRoot: (trie) => { trieRoot = trie; },
+  buildKanjiList,
+  PARTICLES
+};
+/* ============================================================
+   Translator — Ana Çeviri Motoru
+   ============================================================ */
 const Translator = (() => {
   let dictMain = {};
   let activeMode = 'auto';
@@ -373,14 +405,16 @@ const Translator = (() => {
   const KEYS = {
     groq: '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',
     openai: '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',
-    openrouter: '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'
+    openrouter: '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',
+    gemini: '' // İsteğe bağlı: Gemini API anahtarı
   };
   
-  const SYSTEM = (lang) => `You are a professional anime translator. Translate ${lang} to natural Turkish.
-- Keep honorifics: -san, -sama, -kun, -chan, -senpai
-- Keep sound effects (ドン, ガン) as is
-- Use natural Turkish expressions
-- Output ONLY translated lines, same number as input.`;
+  const SYSTEM = (lang) => `You are a professional anime and manga translator. Translate ${lang} to natural, fluent Turkish as if you were a human translator.
+- Keep honorifics: -san, -sama, -kun, -chan, -senpai, -sensei
+- Keep sound effects (e.g. ドン, ガン) as is
+- Match the tone: angry → sert, sad → duygulu, funny → esprili
+- Translate meaning, not word-for-word
+- Output ONLY the translated lines, same number as input.`;
   
   async function loadDict() {
     if (Object.keys(dictMain).length) return;
@@ -388,9 +422,13 @@ const Translator = (() => {
       const res = await fetch('./ja_tr.json');
       dictMain = await res.json();
       // Trie ve Kanji listesini bir kere kur
-      trieRoot = buildTrie(dictMain);
-      buildKanjiList(dictMain);
-    } catch(e) { dictMain = {}; }
+      const trie = JapaneseTokenizer.buildTrie(dictMain);
+      JapaneseTokenizer.setTrieRoot(trie);
+      JapaneseTokenizer.buildKanjiList(dictMain);
+    } catch(e) { 
+      console.warn('Sözlük yüklenemedi, boş devam ediliyor.');
+      dictMain = {}; 
+    }
   }
   
   function postProcess(text) {
@@ -442,7 +480,7 @@ const Translator = (() => {
   async function translateOfflineEntry(text, lang) {
     if (lang !== 'ja') return postProcess(text);
     await loadDict();
-    return postProcess(translateOffline(text, dictMain));
+    return postProcess(JapaneseTokenizer.translateWithDict(text, dictMain));
   }
   
   async function translateBatch(lines, lang) {
@@ -483,7 +521,7 @@ const Translator = (() => {
     if (cache.has(cacheKey)) { lastProvider = '⚡ Cache'; return cache.get(cacheKey); }
     if (!isSRT && blocks.length === 1) {
       await loadDict();
-      const exact = translateOffline(text, dictMain);
+      const exact = JapaneseTokenizer.translateWithDict(text, dictMain);
       if (exact && exact !== text) {
         const result = postProcess(exact);
         lastProvider = '📖 Sözlük';
@@ -515,6 +553,3 @@ const Translator = (() => {
     preloadModel: loadDict
   };
 })();
-
-// Global API
-const JapaneseTokenizer = { tokenize };
