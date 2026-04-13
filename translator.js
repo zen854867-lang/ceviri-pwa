@@ -1,20 +1,14 @@
 /* ============================================================
-   Professional Japanese Translator v2.0
-   Tokenizer + Dictionary + Offline/Online Engine
-   Optimized for anime/manga context
+   Professional Japanese Translator v4.0 - FINAL
+   - Godan/Ichidan/Adjective stemming (çakışmasız)
+   - Partikül başta/sonda/ortada bölme
+   - Trie önbellekli (tek sefer kurulur)
+   - Optimize bileşik isim bölücü
+   - Gelişmiş geçerlilik filtresi
+   - Genişletilmiş kalıp listesi
    ============================================================ */
 
-// ---------- PART OF SPEECH TAGS ----------
-const POS = {
-  PARTICLE: 1,
-  VERB_AUX: 2,
-  ADJ_AUX: 3,
-  SUFFIX: 4,
-  PUNCT: 5,
-  UNKNOWN: 0
-};
-
-// ---------- JAPONCA KARAKTER SINIFLANDIRMA ----------
+// ---------- KARAKTER TÜRÜ ----------
 function charType(ch) {
   const code = ch.charCodeAt(0);
   if (code >= 0x3040 && code <= 0x309F) return 'HIRA';
@@ -27,7 +21,7 @@ function charType(ch) {
   return 'OTHER';
 }
 
-// ---------- PARTİKÜL LİSTESİ (KAPSAMLI) ----------
+// ---------- PARTİKÜLLER ----------
 const PARTICLES = new Set([
   'は','が','を','に','で','と','も','の','から','まで','より','へ','や','か','な','ね','よ','わ','ぞ','ぜ','さ',
   'など','とか','って','て','には','では','とは','のは','からは','までは','よりは','へは','ので','のに','けど',
@@ -36,97 +30,157 @@ const PARTICLES = new Set([
   'ほど','までに','うちに','として','にとって','において','によって','に対して','に関して','にて','をもって'
 ]);
 
-// ---------- FİİL / SIFAT ÇEKİM EKLERİ (KÖK BULMA İÇİN) ----------
-const INFLECTION_MAP = {
-  // Fiil çekim ekleri -> kök dönüşüm kuralları
-  'ている': { remove: 'ている', add: 'る' },
-  'ていた': { remove: 'ていた', add: 'る' },
-  'ています': { remove: 'ています', add: 'る' },
-  'ていました': { remove: 'ていました', add: 'る' },
-  'てる': { remove: 'てる', add: 'る' },
-  'てた': { remove: 'てた', add: 'る' },
-  'てある': { remove: 'てある', add: 'る' },
-  'ておく': { remove: 'ておく', add: 'る' },
-  'てみる': { remove: 'てみる', add: 'る' },
-  'てしまう': { remove: 'てしまう', add: 'る' },
-  'てしまった': { remove: 'てしまった', add: 'る' },
-  'ちゃう': { remove: 'ちゃう', add: 'る' },
-  'じゃう': { remove: 'じゃう', add: 'る' },
-  'てあげる': { remove: 'てあげる', add: 'る' },
-  'てもらう': { remove: 'てもらう', add: 'る' },
-  'てくれる': { remove: 'てくれる', add: 'る' },
-  'ません': { remove: 'ません', add: 'る' },
-  'ました': { remove: 'ました', add: 'る' },
-  'ましょう': { remove: 'ましょう', add: 'る' },
-  'ます': { remove: 'ます', add: 'る' },
-  'ない': { remove: 'ない', add: 'る' },
-  'なかった': { remove: 'なかった', add: 'る' },
-  'なければ': { remove: 'なければ', add: 'る' },
-  'なくて': { remove: 'なくて', add: 'る' },
-  'なきゃ': { remove: 'なきゃ', add: 'る' },
-  'たい': { remove: 'たい', add: 'る' },
-  'たかった': { remove: 'たかった', add: 'る' },
-  'たくない': { remove: 'たくない', add: 'る' },
-  'れる': { remove: 'れる', add: 'る' },
-  'られる': { remove: 'られる', add: 'る' },
-  'せる': { remove: 'せる', add: 'る' },
-  'させる': { remove: 'させる', add: 'る' },
-  'させられる': { remove: 'させられる', add: 'る' },
-  'そう': { remove: 'そう', add: 'る' },
-  'すぎる': { remove: 'すぎる', add: 'る' },
-  'すぎた': { remove: 'すぎた', add: 'る' },
-  'なさい': { remove: 'なさい', add: 'る' },
-  'ください': { remove: 'ください', add: 'る' },
-  'くれ': { remove: 'くれ', add: 'る' },
-  // Sıfat çekimleri
-  'くて': { remove: 'くて', add: 'い' },
-  'かった': { remove: 'かった', add: 'い' },
-  'ければ': { remove: 'ければ', add: 'い' },
-  'く': { remove: 'く', add: 'い' },
-  'くない': { remove: 'くない', add: 'い' },
-  'くなかった': { remove: 'くなかった', add: 'い' },
-  // Kopula
-  'だった': { remove: 'だった', add: 'だ' },
-  'でした': { remove: 'でした', add: 'です' },
-  'だろう': { remove: 'だろう', add: 'だ' },
-  'でしょう': { remove: 'でしょう', add: 'です' }
-};
-
-// Sıralı ek listesi (en uzun önce)
-const SORTED_INFLECTIONS = Object.keys(INFLECTION_MAP).sort((a,b) => b.length - a.length);
-
-// ---------- BİLEŞİK İFADELER (KALIPLAR) ----------
+// ---------- BİLEŞİK İFADELER ----------
 const COMPOUND_PATTERNS = [
-  'しなければならない', 'しなければいけない', 'しなきゃならない',
-  'することができる', 'することができない', 'することがある',
-  'してもいい', 'してはいけない', 'しなくてもいい',
-  'かもしれない', 'にちがいない', 'はずがない', 'はずだ',
-  'ことができる', 'ことがある', 'ことになる', 'ことにする',
-  'ようになる', 'ようにする', 'ようだ', 'みたいだ',
-  'なければならない', 'なければいけない', 'なくてはいけない',
-  'わけではない', 'わけにはいかない', 'ほかはない'
+  'しなければならない','しなければいけない','しなきゃならない','しなきゃいけない',
+  'しなくてはならない','しなくてはいけない','せねばならない','せざるを得ない',
+  'することができる','することができない','することがある','できるようになる',
+  'してもいい','してはいけない','しなくてもいい','してもかまわない',
+  'かもしれない','にちがいない','はずがない','はずだ','ようだ','みたいだ',
+  'らしい','っぽい','そうだ','そうもない',
+  'ことになる','ことにする','ようになる','ようにする',
+  'ずっと前から','ずっと昔から','今まで','これから','それから','あれから',
+  'そのうち','いつから','いつまで','いつの間にか',
+  'てしまった','てしまう','ちゃった','じゃった',
+  'ておいた','ておく','といた','とく',
+  'てみた','てみる','てみたい',
+  'てあげる','てもらう','てくれる',
+  'なければならない','なければいけない','なくてはいけない',
+  'わけではない','わけにはいかない','ほかはない',
+  'にきまっている','にそういない','といってもいい',
+  'どころか','ばかりか','のみならず',
+  'としても','としたって','にしても',
+  'からといって','からには','以上',
+  'たびに','おかげで','せいで','くせに',
+  'なければよかった','てもいいですか','たほうがいい'
 ];
 
-// ---------- TOKENIZER ÇEKİRDEĞİ ----------
-const tokenCache = new Map();
-const MAX_CACHE = 500;
+const SORTED_COMPOUNDS = [...COMPOUND_PATTERNS].sort((a,b) => b.length - a.length);
+const SORTED_PARTICLES = [...PARTICLES].sort((a,b) => b.length - a.length);
 
-function tokenize(text) {
-  if (!text) return [];
-  const key = text;
-  if (tokenCache.has(key)) return tokenCache.get(key);
+// ---------- SAYAÇLAR (TEKRARSIZ) ----------
+const COUNTERS = ['匹','本','枚','台','回','歳','円','時','分','日','月','年','人','個','冊','杯','階','件'];
+function handleCounters(token) {
+  const match = token.match(/^([一二三四五六七八九十百千万０-９\d]+)([匹本枚台回歳円時分日月年人個冊杯階件])$/);
+  if (match) return [match[1], match[2]];
+  return [token];
+}
+
+// ---------- GELİŞMİŞ KÖK BULMA (STEMMING) ----------
+function getStemCandidates(token) {
+  const candidates = new Set();
   
-  const trimmed = text.trim();
-  if (!trimmed) return [];
+  // Özel fiiller
+  if (token === 'した' || token === 'し' || token === 'せ' || token === 'さ' || token === 'する') candidates.add('する');
+  if (token === '来た' || token === 'き' || token === 'こ' || token === 'くる') candidates.add('来る');
+  if (token === '行った') candidates.add('行く');
+  if (token === '言った') candidates.add('言う');
+  if (token === 'やった') candidates.add('やる');
+  if (token === 'できた') candidates.add('できる');
   
-  // 1. Karakter türüne göre ilk ayrıştırma
-  const rawSegments = [];
+  // İ-sıfatları
+  if (token.endsWith('かった')) candidates.add(token.slice(0, -3) + 'い');
+  if (token.endsWith('くて')) candidates.add(token.slice(0, -2) + 'い');
+  if (token.endsWith('ければ')) candidates.add(token.slice(0, -4) + 'い');
+  if (token.endsWith('くない')) candidates.add(token.slice(0, -3) + 'い');
+  if (token.endsWith('くなかった')) candidates.add(token.slice(0, -5) + 'い');
+  
+  // Na-sıfatları
+  if (token.endsWith('だった')) candidates.add(token.slice(0, -3) + 'だ');
+  if (token.endsWith('ではなかった')) candidates.add(token.slice(0, -6) + 'だ');
+  
+  // Ichidan
+  if (token.endsWith('る') && token.length > 1) {
+    const prev = token.slice(-2, -1);
+    if (/[いきしちにひみりぎじぢびぴえけせてねへめれげぜでべぺ]/.test(prev)) {
+      candidates.add(token);
+    }
+  }
+  
+  // Godan - grup bazlı (çakışma yok)
+  const godanGroups = {
+    'う': ['わ','い','え','お','って','った'],
+    'く': ['か','き','け','こ','いて','いた'],
+    'ぐ': ['が','ぎ','げ','ご','いで','いだ'],
+    'す': ['さ','し','せ','そ','して','した'],
+    'つ': ['た','ち','て','と','って','った'],
+    'ぬ': ['な','に','ね','の','んで','んだ'],
+    'ぶ': ['ば','び','べ','ぼ','んで','んだ'],
+    'む': ['ま','み','め','も','んで','んだ'],
+    'る': ['ら','り','れ','ろ','って','った']
+  };
+  
+  for (const [base, suffixes] of Object.entries(godanGroups)) {
+    for (const suff of suffixes) {
+      if (token.endsWith(suff) && token.length > suff.length) {
+        candidates.add(token.slice(0, -suff.length) + base);
+      }
+    }
+  }
+  
+  // Edilgen/ettirgen
+  if (token.endsWith('られる')) candidates.add(token.slice(0, -3) + 'る');
+  if (token.endsWith('させる')) candidates.add(token.slice(0, -3) + 'る');
+  if (token.endsWith('される')) candidates.add(token.slice(0, -3) + 'する');
+  
+  // Eğer hiç aday yoksa kendisini ekle
+  if (candidates.size === 0) candidates.add(token);
+  
+  return Array.from(candidates);
+}
+
+// Sözlükte ilk eşleşen adayı döndür
+function getBestStem(token, dict) {
+  const candidates = getStemCandidates(token);
+  for (const cand of candidates) {
+    if (dict[cand] && isValidMeaning(dict[cand])) return cand;
+  }
+  return token;
+}
+
+// ---------- BİLEŞİK İSİM BÖLÜCÜ (ÖNBELLEKLİ) ----------
+let kanjiCandidateList = [];
+function buildKanjiList(dict) {
+  kanjiCandidateList = Object.keys(dict).filter(k => /^[\u4E00-\u9FFF]+$/.test(k) && isValidMeaning(dict[k]));
+  kanjiCandidateList.sort((a,b) => b.length - a.length);
+}
+
+function splitCompoundNoun(kanjiWord, dict) {
+  const parts = [];
+  let remaining = kanjiWord;
+  while (remaining.length > 0) {
+    let matched = false;
+    for (const cand of kanjiCandidateList) {
+      if (remaining.startsWith(cand)) {
+        parts.push(cand);
+        remaining = remaining.slice(cand.length);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      parts.push(remaining[0]);
+      remaining = remaining.slice(1);
+    }
+  }
+  return parts;
+}
+
+// ---------- TOKENİZASYON ----------
+function splitByCharType(text) {
+  const segments = [];
   let cur = '', curType = null;
-  for (const ch of trimmed) {
+  for (const ch of text) {
     const t = charType(ch);
     if (t === 'PUNCT' || t === 'OTHER') {
-      if (cur) rawSegments.push(cur);
-      if (ch.trim()) rawSegments.push(ch);
+      if (cur) segments.push(cur);
+      // Boşluk karakterini koru (isteğe bağlı)
+      if (ch === ' ' || ch === '\t' || ch === '\n') {
+        // boşlukları ayrı token olarak ekle
+        segments.push(ch);
+      } else if (ch.trim()) {
+        segments.push(ch);
+      }
       cur = ''; curType = null;
     } else if (curType === null) {
       cur = ch; curType = t;
@@ -135,195 +189,208 @@ function tokenize(text) {
     } else if ((curType === 'KANJI' && t === 'HIRA') || (curType === 'HIRA' && t === 'KANJI') || (curType === 'KATA' && t === 'HIRA')) {
       cur += ch; curType = t;
     } else {
-      rawSegments.push(cur);
+      segments.push(cur);
       cur = ch; curType = t;
     }
   }
-  if (cur) rawSegments.push(cur);
-  
-  // 2. Her segmenti daha da parçala
-  const tokens = [];
-  for (const seg of rawSegments) {
-    tokens.push(...splitSegment(seg));
-  }
-  
-  const filtered = tokens.filter(t => t.length > 0);
-  if (tokenCache.size >= MAX_CACHE) tokenCache.delete(tokenCache.keys().next().value);
-  tokenCache.set(key, filtered);
-  return filtered;
+  if (cur) segments.push(cur);
+  return segments;
 }
 
 function splitSegment(seg, depth = 0) {
   if (!seg || depth > 10) return [seg];
-  
-  // Bileşik ifade kontrolü
-  for (const comp of COMPOUND_PATTERNS) {
+  for (const comp of SORTED_COMPOUNDS) {
     if (seg === comp) return [comp];
     if (seg.endsWith(comp) && seg.length > comp.length) {
       return [...splitSegment(seg.slice(0, -comp.length), depth+1), comp];
     }
   }
-  
-  // Partikül ise direkt döndür (ama ileride kullanılmayacak)
   if (PARTICLES.has(seg)) return [seg];
-  
-  // Çekim eki kontrolü
-  for (const infl of SORTED_INFLECTIONS) {
-    if (seg.endsWith(infl) && seg.length > infl.length) {
-      return [...splitSegment(seg.slice(0, -infl.length), depth+1), infl];
-    }
-  }
-  
-  // İçeride partikül ara
-  if (seg.length >= 3) {
-    const sortedParts = [...PARTICLES].sort((a,b) => b.length - a.length);
-    for (const p of sortedParts) {
+  // Partikül taraması - başta, ortada, sonda
+  if (seg.length >= 2) {
+    for (const p of SORTED_PARTICLES) {
       const idx = seg.indexOf(p);
-      if (idx > 0 && idx + p.length < seg.length) {
-        const before = seg.slice(0, idx);
-        const after = seg.slice(idx + p.length);
-        return [...splitSegment(before, depth+1), p, ...splitSegment(after, depth+1)];
+      if (idx !== -1) {
+        // Başta ise
+        if (idx === 0) {
+          return [p, ...splitSegment(seg.slice(p.length), depth+1)];
+        }
+        // Sonda ise
+        if (idx + p.length === seg.length) {
+          return [...splitSegment(seg.slice(0, idx), depth+1), p];
+        }
+        // Ortada
+        if (idx > 0 && idx + p.length < seg.length) {
+          return [...splitSegment(seg.slice(0, idx), depth+1), p, ...splitSegment(seg.slice(idx + p.length), depth+1)];
+        }
       }
     }
   }
-  
-  // する fiili
   if (seg.endsWith('する') && seg.length > 2) {
     return [...splitSegment(seg.slice(0, -2), depth+1), 'する'];
   }
-  
   return [seg];
 }
 
-// ---------- KÖK BULMA (STEMMING) ----------
-function getStem(token) {
-  for (const infl of SORTED_INFLECTIONS) {
-    if (token.endsWith(infl)) {
-      const rule = INFLECTION_MAP[infl];
-      const stem = token.slice(0, -infl.length) + rule.add;
-      return stem;
-    }
+const tokenCache = new Map();
+function tokenize(text) {
+  if (!text) return [];
+  if (tokenCache.has(text)) return tokenCache.get(text);
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const rawSegments = splitByCharType(trimmed);
+  let tokens = [];
+  for (const seg of rawSegments) {
+    tokens.push(...splitSegment(seg));
   }
-  return token;
+  const finalTokens = [];
+  for (const tok of tokens) {
+    finalTokens.push(...handleCounters(tok));
+  }
+  const filtered = finalTokens.filter(t => t.length > 0);
+  if (tokenCache.size > 500) tokenCache.delete(tokenCache.keys().next().value);
+  tokenCache.set(text, filtered);
+  return filtered;
 }
 
-// ---------- SÖZLÜK DEĞERİ GEÇERLİLİK KONTROLÜ ----------
+// ---------- SÖZLÜK DEĞER GEÇERLİLİK ----------
 function isValidMeaning(val) {
-  if (typeof val !== 'string') return false;
-  if (val.length === 0) return false;
-  // Parantezli açıklamalar (örn: "(nesne belirteci)")
-  if (val.startsWith('(') || val.includes(')')) return false;
-  // Sadece boşluk/noktalama
-  if (/^[\s.,!?;:]+$/.test(val)) return false;
-  // Çok kısa ve anlamsız kelimeler
-  const lower = val.toLowerCase().trim();
-  const stopWords = ['de', 'da', 've', 'ise', 'ama', 'gibi', 'ile', 'için', 'bir', 'bu', 'şu', 'o', 'diş'];
-  if (stopWords.includes(lower) && lower.length <= 3) return false;
-  // Japonca karakter içeriyorsa (çeviri değil)
-  if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(val)) return false;
+  if (typeof val !== 'string' || val.length === 0) return false;
+  // Parantez içeriğini temizleyip kontrol et
+  let cleaned = val.replace(/\([^)]*\)/g, '').trim();
+  if (cleaned.length === 0) cleaned = val.replace(/[()]/g, '').trim();
+  if (cleaned.length === 0) return false;
+  if (/^[\s.,!?;:]+$/.test(cleaned)) return false;
+  const lower = cleaned.toLowerCase();
+  const stop = ['de','da','ve','ise','ama','gibi','ile','için','bir','bu','şu','o','diş'];
+  if (stop.includes(lower) && lower.length <= 3) return false;
+  if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(cleaned)) return false;
   return true;
 }
 
-// ---------- ÇEVİRİ (OFFLINE) ----------
-function translateOffline(text, mainDict, secondDict = {}) {
+// ---------- TRIE (SÖZLÜK YÜKLENİNCE KURULUR) ----------
+let trieRoot = { children: {}, isEnd: false, value: null };
+function buildTrie(dict) {
+  const root = { children: {}, isEnd: false, value: null };
+  for (const [key, val] of Object.entries(dict)) {
+    if (!isValidMeaning(val)) continue;
+    let node = root;
+    for (const ch of key) {
+      if (!node.children[ch]) node.children[ch] = { children: {}, isEnd: false };
+      node = node.children[ch];
+    }
+    node.isEnd = true;
+    node.value = val;
+  }
+  return root;
+}
+function longestMatch(tokens, startIdx, trie) {
+  let node = trie;
+  let lastVal = null;
+  let matchLen = 0;
+  for (let i = startIdx; i < tokens.length; i++) {
+    const tok = tokens[i];
+    for (const ch of tok) {
+      if (!node.children[ch]) return lastVal ? { val: lastVal, len: matchLen } : null;
+      node = node.children[ch];
+    }
+    if (node.isEnd) {
+      lastVal = node.value;
+      matchLen = i - startIdx + 1;
+    }
+  }
+  return lastVal ? { val: lastVal, len: matchLen } : null;
+}
+
+// ---------- OFFLINE ÇEVİRİ ----------
+function translateOffline(text, dict) {
   const trimmed = text.trim();
   if (!trimmed) return '';
-  
-  // 1. Tam eşleşme (partikül değilse)
   if (!PARTICLES.has(trimmed)) {
-    const exact = mainDict[trimmed] || secondDict[trimmed];
+    const exact = dict[trimmed];
     if (exact && isValidMeaning(exact)) return exact;
   }
-  
   const tokens = tokenize(trimmed);
   if (!tokens.length) return trimmed;
   
   const resultParts = [];
   let i = 0;
-  
   while (i < tokens.length) {
     const tok = tokens[i];
+    if (PARTICLES.has(tok)) { i++; continue; }
     
-    // Partikül ise tamamen atla
-    if (PARTICLES.has(tok)) {
-      i++;
+    const match = longestMatch(tokens, i, trieRoot);
+    if (match && match.len > 0) {
+      resultParts.push(match.val);
+      i += match.len;
       continue;
     }
     
-    // En uzun eşleşme dene (max 4 token birleşimi)
-    let matched = false;
-    for (let len = Math.min(4, tokens.length - i); len >= 1; len--) {
-      const chunk = tokens.slice(i, i + len).join('');
-      if (PARTICLES.has(chunk)) continue;
-      
-      let meaning = mainDict[chunk];
-      if (!meaning || !isValidMeaning(meaning)) {
-        meaning = secondDict[chunk];
-      }
-      if (meaning && isValidMeaning(meaning)) {
-        resultParts.push(meaning);
-        i += len;
-        matched = true;
-        break;
+    // Kök bul
+    const bestStem = getBestStem(tok, dict);
+    if (bestStem !== tok) {
+      const stemMeaning = dict[bestStem];
+      if (stemMeaning && isValidMeaning(stemMeaning)) {
+        resultParts.push(stemMeaning);
+        i++;
+        continue;
       }
     }
     
-    if (!matched) {
-      // Kökü dene
-      const stem = getStem(tok);
-      if (stem !== tok) {
-        const stemMeaning = mainDict[stem] || secondDict[stem];
-        if (stemMeaning && isValidMeaning(stemMeaning)) {
-          resultParts.push(stemMeaning);
+    // Bileşik isim dene
+    if (/^[\u4E00-\u9FFF]+$/.test(tok) && tok.length > 1) {
+      const subParts = splitCompoundNoun(tok, dict);
+      if (subParts.length > 1) {
+        const translated = subParts.map(p => dict[p] || `[?${p}]`).filter(x => !x.startsWith('[?')).join(' ');
+        if (translated.trim()) {
+          resultParts.push(translated);
           i++;
           continue;
         }
       }
-      
-      // Japonca değilse ve partikül değilse ekle (Latin karakter vs.)
-      const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(tok);
-      if (!isJapanese && !PARTICLES.has(tok)) {
-        resultParts.push(tok);
-      }
-      i++;
     }
+    
+    const isJapanese = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(tok);
+    if (!isJapanese && !PARTICLES.has(tok)) resultParts.push(tok);
+    else if (isJapanese && !PARTICLES.has(tok)) resultParts.push(`[?${tok}]`);
+    i++;
   }
   
-  return resultParts.length > 0 ? resultParts.join(' ').replace(/\s+/g, ' ').trim() : trimmed;
+  const final = resultParts.length > 0 ? resultParts.join(' ').replace(/\s+/g, ' ').trim() : trimmed;
+  if (final.replace(/\[\?[^\]]+\]/g, '').trim().length === 0) return trimmed;
+  return final;
 }
 
 // ---------- TRANSLATOR ANA MODÜL ----------
 const Translator = (() => {
   let dictMain = {};
-  let dictSecond = {};
   let activeMode = 'auto';
   let lastProvider = '-';
   const cache = new Map();
   
+  // UYARI: API anahtarları client-side açıktır. Güvenlik riski taşır.
+  // Gerçek projede sunucu tarafı proxy kullanılması önerilir.
   const KEYS = {
     groq: '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',
     openai: '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',
     openrouter: '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'
   };
   
-  const SYSTEM_PROMPT = (lang) => `You are a professional anime translator. Translate ${lang} to natural Turkish.
-Rules:
-- Keep honorifics: -san, -sama, -kun, -chan, -senpai, -sensei
+  const SYSTEM = (lang) => `You are a professional anime translator. Translate ${lang} to natural Turkish.
+- Keep honorifics: -san, -sama, -kun, -chan, -senpai
 - Keep sound effects (ドン, ガン) as is
-- Use natural Turkish expressions, not word-for-word
-- Match tone: angry→sert, sad→duygulu, funny→esprili
-- Output ONLY the translated lines, same number as input.`;
-
-  async function loadDicts() {
+- Use natural Turkish expressions
+- Output ONLY translated lines, same number as input.`;
+  
+  async function loadDict() {
     if (Object.keys(dictMain).length) return;
     try {
       const res = await fetch('./ja_tr.json');
       dictMain = await res.json();
+      // Trie ve Kanji listesini bir kere kur
+      trieRoot = buildTrie(dictMain);
+      buildKanjiList(dictMain);
     } catch(e) { dictMain = {}; }
-    try {
-      const res = await fetch('./ja_tr_anime.json');
-      dictSecond = await res.json();
-    } catch(e) { dictSecond = {}; }
   }
   
   function postProcess(text) {
@@ -374,31 +441,28 @@ Rules:
   
   async function translateOfflineEntry(text, lang) {
     if (lang !== 'ja') return postProcess(text);
-    await loadDicts();
-    return postProcess(translateOffline(text, dictMain, dictSecond));
+    await loadDict();
+    return postProcess(translateOffline(text, dictMain));
   }
   
   async function translateBatch(lines, lang) {
-    const system = SYSTEM_PROMPT(lang === 'ja' ? 'Japanese' : 'English');
+    const system = SYSTEM(lang === 'ja' ? 'Japanese' : 'English');
     const numbered = lines.map((l, i) => `${i+1}. ${l}`).join('\n');
     const prompt = `Translate these ${lines.length} lines to Turkish:\n${numbered}`;
-    
     if (activeMode === 'google') {
       const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
       return out.map(postProcess);
     }
-    
     for (const p of aiProviders) {
       try {
         const raw = await p.call(system, prompt);
         lastProvider = p.name;
         const parsed = raw.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(l => l);
         if (parsed.length >= lines.length * 0.8) {
-          return lines.map((_, i) => postProcess(parsed[i] || ''));
+          return lines.map((orig, i) => postProcess(parsed[i] || orig));
         }
       } catch(e) { console.warn(p.name, e); }
     }
-    
     lastProvider = 'Google';
     const out = await Promise.all(lines.map(l => l.trim() ? googleTranslate(l, lang) : Promise.resolve(l)));
     return out.map(postProcess);
@@ -407,23 +471,19 @@ Rules:
   async function translate(text, lang) {
     if (!text?.trim()) throw new Error('Boş metin');
     if (!['en','ja'].includes(lang)) throw new Error('Desteklenmeyen dil');
-    
     const isSRT = text.includes('|||SEP|||');
     const blocks = isSRT ? text.split('\n|||SEP|||\n') : text.split('\n');
     const useOffline = !navigator.onLine || activeMode === 'offline';
-    
     if (useOffline) {
       lastProvider = '📴 Offline';
       const res = await Promise.all(blocks.map(b => b.trim() ? translateOfflineEntry(b, lang) : Promise.resolve(b)));
       return res.join(isSRT ? '\n|||SEP|||\n' : '\n');
     }
-    
     const cacheKey = `${lang}:${text.substring(0,200)}`;
     if (cache.has(cacheKey)) { lastProvider = '⚡ Cache'; return cache.get(cacheKey); }
-    
     if (!isSRT && blocks.length === 1) {
-      await loadDicts();
-      const exact = translateOffline(text, dictMain, dictSecond);
+      await loadDict();
+      const exact = translateOffline(text, dictMain);
       if (exact && exact !== text) {
         const result = postProcess(exact);
         lastProvider = '📖 Sözlük';
@@ -431,7 +491,6 @@ Rules:
         return result;
       }
     }
-    
     const BATCH = 6;
     const results = new Array(blocks.length);
     for (let i = 0; i < blocks.length; i += BATCH) {
@@ -441,7 +500,6 @@ Rules:
       batch.forEach((_, idx) => { results[i + idx] = translated[idx] || batch[idx]; });
       if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, 100));
     }
-    
     const final = results.join(isSRT ? '\n|||SEP|||\n' : '\n');
     cache.set(cacheKey, final);
     return final;
@@ -454,9 +512,9 @@ Rules:
     getMode: () => activeMode,
     setMode: (m) => { activeMode = m; },
     getLastProvider: () => lastProvider,
-    preloadModel: loadDicts
+    preloadModel: loadDict
   };
 })();
 
-// Dışa aktar (global)
-const JapaneseTokenizer = { tokenize, translateWithDict: translateOffline };
+// Global API
+const JapaneseTokenizer = { tokenize };
