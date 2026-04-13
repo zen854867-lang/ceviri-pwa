@@ -1,90 +1,178 @@
 /* ============================================================
-   KuromojiTokenizer — Kuromoji.js + Özel Sözlük ile Gelişmiş Tokenizasyon
+   JapaneseTokenizer — Gelişmiş, Profesyonel Seviye
+   Fiil çekimleri, sıfatlar, bileşik ifadeler, partiküller
    ============================================================ */
-const KuromojiTokenizer = (() => {
-  let tokenizer = null;
-  let dict = null;
-  const initPromise = initTokenizer();
+const JapaneseTokenizer = (() => {
+  // ----- PARTİKÜLLER (Genişletilmiş) -----
+  const PARTICLES = new Set([
+    'は','が','を','に','で','と','も','の','から','まで','より','へ',
+    'や','か','な','ね','よ','わ','ぞ','ぜ','さ','など','とか','って','て',
+    'には','では','とは','のは','からは','までは','よりは',
+    'ので','のに','けど','けれど','けれども','し','たり','ながら','ば',
+    'たら','なら','ても','でも','とも','ては','では','ちゃ','じゃ',
+    'かい','だい','かいな','かな','かしら','さえ','すら','こそ',
+    'だけ','のみ','ばかり','くらい','ぐらい','ほど','までに','うちに',
+    'として','にとって','において','によって','に対して','に関して'
+  ]);
 
-  async function initTokenizer() {
-    return new Promise((resolve, reject) => {
-      kuromoji.builder({ dicPath: 'https://cdn.jsdelivr.net/npm/kuromoji@0.1.2/dict/' }).build((err, _tokenizer) => {
-        if (err) return reject(err);
-        tokenizer = _tokenizer;
-        resolve(tokenizer);
-      });
-    });
+  // ----- FİİL ÇEKİM EKLERİ (Genişletilmiş) -----
+  const VERB_ENDINGS = [
+    'ている','ていた','ています','ていました','てる','てた',
+    'てある','ておく','てみる','てしまう','てしまった',
+    'てあげる','てもらう','てくれる','てやる',
+    'ません','ました','ましょう','ますか','ます','ませ','まして',
+    'ない','なかった','なければ','なくて','なくちゃ','なきゃ',
+    'たい','たかった','たくない','たがる',
+    'だった','でした','だろう','でしょう','です','だ',
+    'れる','られる','せる','させる','させられる',
+    'そう','すぎる','すぎた','まい','ず','ぬ','ん',
+    'え','えよ','ろ','な','なさい','ください','くれ',
+    'はじめる','だす','つづける','おわる','かける','あう',
+    'こむ','あげる','きる','ぬく','まくる','そこなう'
+  ];
+
+  // ----- BİLEŞİK İFADELER -----
+  const COMPOUNDS = [
+    'しなければならない','しなければいけない','することができる',
+    'してもいい','してはいけない','しなくてもいい',
+    'かもしれない','にちがいない','はずがない','はずだ',
+    'ことができる','ことがある','ことになる','ことにする',
+    'ようになる','ようにする','ようだ','みたいだ',
+    'てしまった','てしまう','ておいた','ておく',
+    'てみた','てみる','てあげる','てもらう','てくれる',
+    'なければならない','なければいけない','なくてはいけない',
+    'わけではない','わけにはいかない','ほかはない',
+    'にきまっている','にそういない','といってもいい'
+  ];
+
+  // ----- SIFAT ÇEKİMLERİ -----
+  const ADJ_ENDINGS = [
+    'くて','かった','ければ','かろう','く','き',
+    'だった','ではなかった','じゃなかった','で','に','な'
+  ];
+
+  const ALL_ENDINGS = [...VERB_ENDINGS, ...ADJ_ENDINGS].sort((a,b) => b.length - a.length);
+  const SORTED_PARTICLES = [...PARTICLES].sort((a,b) => b.length - a.length);
+
+  function charType(ch) {
+    const code = ch.charCodeAt(0);
+    if (code >= 0x3040 && code <= 0x309F) return 'HIRA';
+    if (code >= 0x30A0 && code <= 0x30FF) return 'KATA';
+    if (code >= 0x4E00 && code <= 0x9FFF) return 'KANJI';
+    if (code >= 0xFF65 && code <= 0xFF9F) return 'KATA';
+    if ((code >= 0x41 && code <= 0x5A) || (code >= 0x61 && code <= 0x7A)) return 'LATIN';
+    if (code >= 0x30 && code <= 0x39) return 'NUM';
+    if (code >= 0x3000 && code <= 0x303F) return 'PUNCT';
+    return 'OTHER';
   }
 
-  async function ensureReady() {
-    if (!tokenizer) await initPromise;
-    return tokenizer;
-  }
-
-  async function tokenize(text) {
-    if (!text) return [];
-    const t = await ensureReady();
-    const rawTokens = t.tokenize(text);
-    
-    // "Bunkatsu" benzeri birleştirme: Ekleri anlamlı parçalara bağla
-    const merged = [];
-    let buffer = { word: '', reading: '', pos: '' };
-    
-    for (const tok of rawTokens) {
-      const surface = tok.surface_form;
-      const pos = tok.pos;
-      const reading = tok.reading || surface;
-      
-      // Yardımcı fiil/ek ise buffer'a ekle
-      if (pos === '助動詞' || pos === '助詞' || pos === '接尾辞') {
-        buffer.word += surface;
-        buffer.reading += reading;
+  function splitByCharType(text) {
+    const result = [];
+    let cur = '', curType = null;
+    for (const ch of text) {
+      const t = charType(ch);
+      if (t === 'PUNCT' || t === 'OTHER') {
+        if (cur) result.push(cur);
+        if (ch.trim()) result.push(ch);
+        cur = ''; curType = null;
+      } else if (curType === null) {
+        cur = ch; curType = t;
+      } else if (t === curType) {
+        cur += ch;
+      } else if ((curType === 'KANJI' && t === 'HIRA') || (curType === 'HIRA' && t === 'KANJI') || (curType === 'KATA' && t === 'HIRA')) {
+        cur += ch; curType = t;
       } else {
-        if (buffer.word) {
-          merged.push({
-            surface: buffer.word,
-            reading: buffer.reading,
-            pos: buffer.pos,
-            basic: buffer.word
-          });
-          buffer = { word: '', reading: '', pos: '' };
-        }
-        buffer = { word: surface, reading: reading, pos: pos };
+        result.push(cur);
+        cur = ch; curType = t;
       }
     }
-    if (buffer.word) {
-      merged.push({
-        surface: buffer.word,
-        reading: buffer.reading,
-        pos: buffer.pos,
-        basic: buffer.word
-      });
+    if (cur) result.push(cur);
+    return result;
+  }
+
+  function splitSegment(seg, depth = 0) {
+    if (!seg || depth > 10) return [seg];
+    for (const c of COMPOUNDS) {
+      if (seg === c) return [seg];
+      if (seg.endsWith(c) && seg.length > c.length) {
+        return [...splitSegment(seg.slice(0, -c.length), depth+1), c];
+      }
     }
-    
-    // Yüzey formlarını döndür
-    return merged.map(t => t.surface).filter(s => s.trim().length > 0);
+    if (PARTICLES.has(seg)) return [seg];
+    for (const ending of ALL_ENDINGS) {
+      if (seg.endsWith(ending) && seg.length > ending.length) {
+        return [...splitSegment(seg.slice(0, -ending.length), depth+1), ending];
+      }
+    }
+    if (seg.length >= 3) {
+      for (const p of SORTED_PARTICLES) {
+        const idx = seg.indexOf(p);
+        if (idx > 0 && idx + p.length < seg.length) {
+          const before = seg.slice(0, idx), after = seg.slice(idx + p.length);
+          return [...splitSegment(before, depth+1), p, ...splitSegment(after, depth+1)];
+        }
+      }
+    }
+    if (seg.endsWith('する') && seg.length > 2) {
+      return [...splitSegment(seg.slice(0, -2), depth+1), 'する'];
+    }
+    return [seg];
   }
 
-  function translateWithDict(text, dictObj) {
-    // Eşleşme önceliği: Tam eşleşme, sonra token bazlı
+  const tokenCache = new Map();
+  const MAX_CACHE = 500;
+
+  function tokenize(text) {
+    if (!text) return [];
+    const key = text;
+    if (tokenCache.has(key)) return tokenCache.get(key);
     const trimmed = text.trim();
-    if (dictObj[trimmed]) return dictObj[trimmed];
-    
-    // Token'ları al (asenkron tokenize kullanmak için Promise gerek, ancak burada senkron çağrılacağı için önceden hazır varsay)
-    // Not: translateWithDict asenkron olmalı; bu yüzden fonksiyon imzasını değiştiriyoruz.
-    return null; // Bu fonksiyon asenkron olarak çağrılacak şekilde düzenlenecek
+    if (!trimmed) return [];
+    const segments = splitByCharType(trimmed);
+    const tokens = [];
+    for (const seg of segments) tokens.push(...splitSegment(seg));
+    const filtered = tokens.filter(t => t.length > 0);
+    if (tokenCache.size >= MAX_CACHE) tokenCache.delete(tokenCache.keys().next().value);
+    tokenCache.set(key, filtered);
+    return filtered;
   }
 
-  return {
-    init: initTokenizer,
-    tokenize,
-    ensureReady,
-    translateWithDict
-  };
+  function translateWithDict(text, dict) {
+    const trimmed = text.trim();
+    if (dict[trimmed]) return dict[trimmed];
+    const tokens = tokenize(trimmed);
+    if (!tokens.length) return null;
+    const parts = [];
+    let i = 0, anyFound = false;
+    while (i < tokens.length) {
+      let matched = false;
+      for (let len = Math.min(5, tokens.length - i); len >= 1; len--) {
+        const chunk = tokens.slice(i, i + len).join('');
+        if (dict[chunk]) {
+          parts.push(dict[chunk]);
+          i += len;
+          matched = anyFound = true;
+          break;
+        }
+      }
+      if (!matched) {
+        const tok = tokens[i];
+        if (!PARTICLES.has(tok) && /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(tok)) {
+          // Japonca ama sözlükte yok, es geç
+        } else if (!PARTICLES.has(tok)) {
+          parts.push(tok);
+        }
+        i++;
+      }
+    }
+    return anyFound ? parts.join(' ').replace(/\s+/g, ' ').trim() : null;
+  }
+
+  return { tokenize, translateWithDict };
 })();
 
 /* ============================================================
-   Translator — Ana çeviri modülü (Kuromoji + Geniş Sözlük)
+   Translator — Profesyonel Çeviri Motoru
    ============================================================ */
 const Translator = (() => {
   let sozluk = null;
@@ -98,13 +186,14 @@ const Translator = (() => {
     openrouter: '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'
   };
 
-  const SYSTEM = (lang) => `You are a professional anime subtitle translator. Translate ${lang} to natural Turkish.
+  const SYSTEM = (lang) => `You are a professional anime and manga translator. Translate ${lang} to natural, fluent Turkish as if it were a human translator specializing in anime.
 Rules:
-- Keep honorifics: senpai, kun, chan, sama, sensei, dono, san
-- Translate naturally and in context
-- Keep sound effects as is (e.g. ドン, ガン)
-- Match the tone: angry=sert, sad=duygusal, funny=eğlenceli
-- Output ONLY translations, one per line, same count as input`;
+- Preserve honorifics: -san, -sama, -kun, -chan, -senpai, -sensei, -dono
+- Keep sound effects (e.g., ドン, ガン) as is
+- Match the character's tone: angry → sert/kızgın, sad → duygulu, funny → esprili, formal → resmi
+- Translate meaning, not words; use natural Turkish expressions
+- If a word is untranslatable, keep it in romaji
+- Output ONLY the translation, one line per input line, same number of lines.`;
 
   const JP_REGEX = /[\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\uFF00-\uFFEF]/;
 
@@ -148,19 +237,14 @@ Rules:
     return sozluk;
   }
 
-  async function dictExact(text) {
-    const d = await loadSozluk();
-    return d[text.trim()] || null;
-  }
-
   async function callAPI(url, key, model, system, userMsg) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: userMsg }], temperature: 0.2, max_tokens: 2048 }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: userMsg }], temperature: 0.15, max_tokens: 2048 }),
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -174,9 +258,9 @@ Rules:
   }
 
   const aiProviders = [
-    { name: 'Groq',       call: (s, m) => callAPI('https://api.groq.com/openai/v1/chat/completions',      KEYS.groq,       'llama-3.1-8b-instant',                  s, m) },
-    { name: 'GPT-4o-mini',call: (s, m) => callAPI('https://api.openai.com/v1/chat/completions',           KEYS.openai,     'gpt-4o-mini',                           s, m) },
-    { name: 'OpenRouter', call: (s, m) => callAPI('https://openrouter.ai/api/v1/chat/completions',        KEYS.openrouter, 'meta-llama/llama-3.1-8b-instruct:free', s, m) }
+    { name: 'Groq',       call: (s, m) => callAPI('https://api.groq.com/openai/v1/chat/completions',      KEYS.groq,       'llama-3.3-70b-versatile',                s, m) },
+    { name: 'OpenRouter', call: (s, m) => callAPI('https://openrouter.ai/api/v1/chat/completions',        KEYS.openrouter, 'meta-llama/llama-3.3-70b-instruct:free', s, m) },
+    { name: 'GPT-4o-mini',call: (s, m) => callAPI('https://api.openai.com/v1/chat/completions',           KEYS.openai,     'gpt-4o-mini',                           s, m) }
   ];
 
   async function googleTranslate(text, lang) {
@@ -191,28 +275,9 @@ Rules:
     if (lang !== 'ja') return postProcess(text);
     const d = await loadSozluk();
     const trimmed = text.trim();
-    
-    // 1. Tam eşleşme
     if (d[trimmed]) return postProcess(d[trimmed]);
-    
-    // 2. Kuromoji ile tokenize edip sözlükte ara
-    await KuromojiTokenizer.ensureReady();
-    const tokens = await KuromojiTokenizer.tokenize(trimmed);
-    
-    const parts = [];
-    let anyFound = false;
-    for (const token of tokens) {
-      if (d[token]) {
-        parts.push(d[token]);
-        anyFound = true;
-      } else {
-        // Japonca olmayan karakterleri olduğu gibi bırak
-        if (!JP_REGEX.test(token)) parts.push(token);
-      }
-    }
-    
-    if (anyFound) return postProcess(parts.join(' '));
-    return postProcess(trimmed);
+    const result = JapaneseTokenizer.translateWithDict(trimmed, d);
+    return result ? postProcess(result) : postProcess(trimmed);
   }
 
   async function translateBatch(lines, lang) {
@@ -252,7 +317,7 @@ Rules:
     const useOffline = !navigator.onLine || activeMode === 'offline';
 
     if (useOffline) {
-      lastProvider = '📴 Sözlük';
+      lastProvider = '📴 Offline Sözlük';
       const results = await Promise.all(blocks.map(b => b.trim() ? offlineTranslate(b, lang) : Promise.resolve(b)));
       return results.join(isSRT ? sep : '\n');
     }
@@ -262,16 +327,16 @@ Rules:
     if (cached) { lastProvider = '⚡ Cache'; return cached; }
 
     if (!isSRT && blocks.length === 1) {
-      const dictMatch = await dictExact(text);
-      if (dictMatch) {
-        const result = postProcess(dictMatch);
+      const d = await loadSozluk();
+      if (d[text.trim()]) {
+        const result = postProcess(d[text.trim()]);
         lastProvider = '📖 Sözlük';
         setCached(cacheKey, result);
         return result;
       }
     }
 
-    const BATCH = 8;
+    const BATCH = 6;
     const results = new Array(blocks.length);
     for (let i = 0; i < blocks.length; i += BATCH) {
       const batch = blocks.slice(i, i + BATCH);
@@ -280,21 +345,13 @@ Rules:
         batch.forEach((b, j) => { results[i + j] = b; });
         continue;
       }
-      const dictResults = await Promise.all(toTranslate.map(b => dictExact(b)));
-      const needsAI = toTranslate.filter((_, j) => dictResults[j] === null);
-      let aiTranslated = [];
-      if (needsAI.length) aiTranslated = await translateBatch(needsAI, lang);
-
-      let aiIdx = 0, trIdx = 0;
+      const aiTranslated = await translateBatch(toTranslate, lang);
+      let aiIdx = 0;
       batch.forEach((b, j) => {
         if (!b.trim()) results[i + j] = b;
-        else {
-          const dMatch = dictResults[trIdx];
-          results[i + j] = dMatch !== null ? postProcess(dMatch) : (aiTranslated[aiIdx++] || b);
-          trIdx++;
-        }
+        else results[i + j] = aiTranslated[aiIdx++] || b;
       });
-      if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, 50));
+      if (i + BATCH < blocks.length) await new Promise(r => setTimeout(r, 100));
     }
 
     const finalResult = results.join(isSRT ? sep : '\n');
@@ -302,14 +359,10 @@ Rules:
     return finalResult;
   }
 
-  async function checkModelExists() { return true; }
-  async function preloadModel() {
-    await loadSozluk();
-    await KuromojiTokenizer.ensureReady();
-  }
+  async function preloadModel() { await loadSozluk(); }
 
   return {
-    translate, getIsOnline, checkModelExists, preloadModel,
-    isModelsReady, getMode, setMode, getLastProvider
+    translate, getIsOnline, preloadModel, isModelsReady,
+    getMode, setMode, getLastProvider
   };
 })();
